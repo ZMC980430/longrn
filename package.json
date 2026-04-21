@@ -1,0 +1,20 @@
+{
+  "name": "longrn-learning-path-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "终生学习者智能学习路径系统开发工作区，包含 Obsidian 与 Logseq 插件原型。",
+  "main": "src/obsidian-plugin/main.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint . --ext .ts",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^20.14.0",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/parser": "^7.8.0",
+    "@typescript-eslint/eslint-plugin": "^7.8.0"
+  },
+  "dependencies": {}
+}
