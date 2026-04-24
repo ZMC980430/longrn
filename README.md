@@ -1,34 +1,53 @@
 # Longrn: 终生学习者智能学习路径系统
 
-## 项目目标
+项目目标
 
-本项目目标是构建一个基于 Obsidian 和 Logseq 的智能学习路径系统，采用 SDD（软件设计文档）开发模式管理需求、架构与实现。
+Longrn 旨在为终生学习者提供智能学习路径生成与结构化笔记功能，深度集成 Obsidian 与 Logseq。仓库采用 SDD 驱动开发（SDD-driven development），详细设计与实现说明请参见 docs/SDD.md。
 
-## 初始化工作区内容
+快速开始
 
-- `Longrn.md`：系统整体方案与功能说明文档。
-- `docs/SDD.md`：软件设计文档草案，包含需求、架构、模块划分与开发计划。
-- `src/obsidian-plugin/main.ts`：Obsidian 插件原型入口。
-- `src/logseq-plugin/main.ts`：Logseq 插件原型入口。
-- `package.json` 和 `tsconfig.json`：TypeScript 开发环境配置。
-
-## 开发流程建议
-
-1. 先补充 `docs/SDD.md` 中的需求与架构细节。
-2. 使用 `npm install` 安装 TypeScript 开发依赖。
-3. 逐步实现模块：知识库构建、路径规划、笔记生成与自动链接。
-4. 采用 `src/obsidian-plugin` 与 `src/logseq-plugin` 进行双平台适配。
-
-## 快速开始
+1. 安装依赖：
 
 ```bash
-cd e:\Agent\Longrn
 npm install
+```
+
+2. 构建：
+
+```bash
 npm run build
 ```
 
-## 结构说明
+3. 本地开发（TypeScript）：编辑 src/ 下代码并使用 `npm run build` 编译。
 
-- `docs/SDD.md`：软件设计文档
-- `src/obsidian-plugin`：Obsidian 插件代码
-- `src/logseq-plugin`：Logseq 插件代码
+主要文档
+
+- docs/SDD.md：SDD 模板与项目设计
+- docs/SDD-checklist.md：SDD 完成度检查清单
+- docs/sample-SDD-Longrn.md：示例 SDD
+- docs/SDD_WORKFLOW.md：SDD 驱动开发流程说明
+
+贡献与社区
+
+请参阅 CONTRIBUTING.md 与 CODE_OF_CONDUCT.md。Issue/PR 模板位于 .github/ 目录，提交 PR 时请在 PR 描述中引用相关 SDD 节点并完成 SDD-checklist。
+
+插件原型
+
+- Obsidian 插件：src/obsidian-plugin
+- Logseq 插件：src/logseq-plugin
+
+构建插件
+
+使用根目录的构建脚本：
+
+```bash
+./scripts/build-plugins.sh
+```
+
+持续集成
+
+CI 配置见 .github/workflows/ci.yml；发布自动化见 .github/workflows/release.yml。
+
+联系方式
+
+在 Issue 区提出讨论或联系维护者。
