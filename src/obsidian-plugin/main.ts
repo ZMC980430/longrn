@@ -1,4 +1,4 @@
-import { Plugin, Notice } from 'obsidian';
+import { Plugin, Notice, PluginSettingTab, Setting } from 'obsidian';
 import { KnowledgeBaseBuilder, Note } from '../core/knowledge-builder.js';
 import { PathPlanner } from '../core/path-planner.js';
 import { NoteGenerator } from '../core/note-generator.js';
@@ -62,6 +62,9 @@ export default class LearningPathPlugin extends Plugin {
       name: '生成复习笔记',
       callback: () => void this.generateReviewNote(),
     });
+
+    // 注册设置页面（插件介绍与使用说明）
+    this.addSettingTab(new LongrnSettingTab(this.app, this));
   }
 
   async buildKnowledgeBase(): Promise<Map<string, Note>> {
@@ -280,5 +283,130 @@ export default class LearningPathPlugin extends Plugin {
 
   onunload() {
     console.log('Unloading Learning Path Plugin');
+  }
+}
+
+/**
+ * Longrn 插件设置页面
+ * 显示插件介绍、功能说明、版本信息和使用方法
+ */
+class LongrnSettingTab extends PluginSettingTab {
+  plugin: LearningPathPlugin;
+
+  constructor(app: any, plugin: LearningPathPlugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    // ── 标题 ──
+    containerEl.createEl('h1', { text: '🧠 Longrn 学习路径系统' });
+
+    // ── 插件简介 ──
+    containerEl.createEl('h2', { text: '📖 关于本插件' });
+    containerEl.createEl('p', {
+      text: 'Longrn 是一个面向终生学习者的智能学习路径系统。它自动扫描你的知识库笔记，' +
+        '基于知识图谱和语义分析生成个性化的学习路径，并利用 FSRS 间隔重复算法科学安排复习计划。',
+    });
+    containerEl.createEl('p', {
+      text: '版本: ' + this.plugin.manifest.version,
+    });
+
+    // ── 功能列表 ──
+    containerEl.createEl('h2', { text: '⚡ 功能命令' });
+    const commands = [
+      {
+        name: '生成学习路径',
+        desc: '扫描 Vault 中的笔记，分析知识结构，生成从基础到目标主题的学习路径并创建笔记。',
+      },
+      {
+        name: '语义生成学习路径',
+        desc: '利用 AI 语义嵌入技术，根据语义相关性生成更智能的学习路径。首次使用需下载模型。',
+      },
+      {
+        name: '状态感知学习路径',
+        desc: '追踪每个知识点的学习状态（未学/计划/进行中/已掌握/已归档），自动跳过已掌握节点。',
+      },
+      {
+        name: '查看今日待复习列表',
+        desc: '基于 FSRS 间隔重复算法，显示今日到期待复习的知识点统计。',
+      },
+      {
+        name: '生成复习笔记',
+        desc: '为到期待复习的知识点自动生成复习笔记模板，含回顾内容和评分按钮。',
+      },
+    ];
+
+    for (const cmd of commands) {
+      new Setting(containerEl)
+        .setName(cmd.name)
+        .setDesc(cmd.desc);
+    }
+
+    // ── 使用方法 ──
+    containerEl.createEl('h2', { text: '📋 使用流程' });
+    const ol = containerEl.createEl('ol');
+    const steps = [
+      '确保你的 Vault 中已有一定数量的学习笔记',
+      '通过命令面板 (Cmd/Ctrl+P) 运行「生成学习路径」命令',
+      '插件会自动扫描笔记、构建知识图谱、生成目标主题的学习路径',
+      '如需更智能的路径，可尝试「语义生成学习路径」',
+      '学习过程中使用「状态感知学习路径」跳过已掌握的内容',
+      '定期使用「查看今日待复习列表」和「生成复习笔记」进行复习',
+    ];
+    for (const step of steps) {
+      ol.createEl('li', { text: step });
+    }
+
+    // ── 学习状态说明 ──
+    containerEl.createEl('h2', { text: '📊 学习状态说明' });
+    const statuses = [
+      { name: 'unknown（未知）', desc: '初始状态，尚未开始学习' },
+      { name: 'planned（已计划）', desc: '已纳入学习计划' },
+      { name: 'in_progress（进行中）', desc: '正在学习中' },
+      { name: 'mastered（已掌握）', desc: '已完成学习，进入复习周期' },
+      { name: 'archived（已归档）', desc: '已完成全部复习，无需再学' },
+    ];
+
+    const table = containerEl.createEl('table');
+    table.createEl('thead').createEl('tr', {}, (tr) => {
+      tr.createEl('th', { text: '状态' });
+      tr.createEl('th', { text: '说明' });
+    });
+    const tbody = table.createEl('tbody');
+    for (const s of statuses) {
+      tbody.createEl('tr', {}, (tr) => {
+        tr.createEl('td', { text: s.name });
+        tr.createEl('td', { text: s.desc });
+      });
+    }
+
+    // ── 注意事项 ──
+    containerEl.createEl('h2', { text: '⚠️ 注意事项' });
+    const notes = [
+      '语义嵌入功能依赖 @xenova/transformers 模型，首次使用需联网下载（约 80MB）',
+      '学习状态持久化在 vault 根目录的 .longrn/state.json 文件中',
+      'FSRS 复习调度采用 FSRS-5 算法，根据你的评分动态调整复习间隔',
+      '如遇到问题，可检查 Obsidian 控制台 (Ctrl+Shift+I) 查看日志',
+    ];
+    for (const note of notes) {
+      containerEl.createEl('p', { text: '• ' + note });
+    }
+
+    // ── 链接 ──
+    containerEl.createEl('h2', { text: '🔗 资源链接' });
+    new Setting(containerEl)
+      .setName('项目仓库')
+      .setDesc('GitHub - Longrn 学习路径系统')
+      .addButton((btn) => {
+        btn.setButtonText('在 GitHub 上查看');
+        btn.onClick(() => {
+          // @ts-ignore
+          window.open('https://github.com/longrn', '_blank');
+        });
+      });
   }
 }
