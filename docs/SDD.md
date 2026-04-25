@@ -52,7 +52,10 @@
 
 ### 4.2 技术选型
 - 语言：TypeScript
-- 构建：`tsc`
+- 构建：
+  - 核心库：`tsc`（TypeScript 编译器）
+  - Obsidian 插件：`esbuild`（单文件打包，`obsidian` API 标记为 external）
+  - Logseq 插件：`tsc`（TypeScript 编译器）
 - 插件平台：Obsidian 与 Logseq SDK
 
 ## 5. 模块详细设计

@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "description": "终生学习者智能学习路径系统开发工作区，包含 Obsidian 与 Logseq 插件原型。",
-  "main": "src/obsidian-plugin/main.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:obsidian": "node scripts/build-obsidian.mjs",
+    "build:logseq": "tsc -p tsconfig.json",
+    "build:plugins": "bash scripts/build-plugins.sh",
     "lint": "eslint . --ext .ts",
     "prepare": "npm run build"
   },
@@ -15,6 +17,7 @@
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^7.8.0",
     "@typescript-eslint/parser": "^7.8.0",
+    "esbuild": "^0.28.0",
     "eslint": "^8.57.0",
     "obsidian": "^1.12.3",
     "typescript": "^5.5.4"

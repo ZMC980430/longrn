@@ -20,8 +20,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build --if-present
+      - name: Build core library
+        run: npm run build
+
+      - name: Build Obsidian plugin (esbuild bundled)
+        run: npm run build:obsidian
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
