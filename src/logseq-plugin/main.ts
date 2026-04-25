@@ -1,11 +1,7 @@
 import '@logseq/libs';
-import { KnowledgeBaseBuilder, Note } from '../core/knowledge-builder';
-import { PathPlanner } from '../core/path-planner';
-import { NoteGenerator } from '../core/note-generator';
-
-let kbBuilder: KnowledgeBaseBuilder;
-let pathPlanner: PathPlanner;
-let noteGenerator: NoteGenerator;
+import { KnowledgeBaseBuilder, Note } from '../core/knowledge-builder.js';
+import { PathPlanner } from '../core/path-planner.js';
+import { NoteGenerator } from '../core/note-generator.js';
 
 async function main() {
   console.log('Logseq Learning Path Plugin loaded');
@@ -16,6 +12,10 @@ async function main() {
 
   logseq.Editor.registerSlashCommand('生成学习路径', async () => {
     await generateLearningPath(kbBuilder, pathPlanner, noteGenerator);
+  });
+
+  logseq.Editor.registerSlashCommand('语义生成学习路径', async () => {
+    await generateSemanticPath(kbBuilder, pathPlanner, noteGenerator);
   });
 }
 
@@ -31,7 +31,7 @@ async function buildKnowledgeBase(kbBuilder: KnowledgeBaseBuilder): Promise<Map<
     notes.push({
       id: page.uuid,
       title: page.name,
-      path: page.name, // Simplified
+      path: page.name,
       content,
       tags: parsed.tags,
       links: parsed.links
@@ -48,7 +48,7 @@ async function generateLearningPath(kbBuilder: KnowledgeBaseBuilder, pathPlanner
     const notes = Array.from((await buildKnowledgeBase(kbBuilder)).values());
     const graph = kbBuilder.buildGraph(notes);
 
-    const target = 'Python数据分析'; // Example
+    const target = 'Python数据分析';
     const paths = pathPlanner.planPath(target, graph);
 
     if (paths.length === 0) {
@@ -74,6 +74,46 @@ async function generateLearningPath(kbBuilder: KnowledgeBaseBuilder, pathPlanner
     logseq.UI.showMsg('学习路径生成成功!', 'success');
   } catch (error: any) {
     logseq.UI.showMsg(`生成失败: ${error.message}`);
+  }
+}
+
+// ===== Phase 2: Semantic Path =====
+
+async function generateSemanticPath(kbBuilder: KnowledgeBaseBuilder, pathPlanner: PathPlanner, noteGenerator: NoteGenerator) {
+  try {
+    logseq.UI.showMsg('开始分析知识库...');
+    const notes = Array.from((await buildKnowledgeBase(kbBuilder)).values());
+
+    logseq.UI.showMsg('正在生成语义索引...');
+    // vaultPath for Logseq — use a reasonable default
+    const vaultPath = '/tmp/longrn-logseq';
+    await kbBuilder.embedAll(notes, vaultPath);
+
+    const graph = kbBuilder.buildGraph(notes);
+
+    const query = '数据分析';
+    const engine = kbBuilder.getEmbeddingEngine();
+    if (!engine) throw new Error('Embedding engine not ready');
+
+    logseq.UI.showMsg('正在生成语义路径...');
+    const semanticPath = await pathPlanner.semanticPath(query, graph, engine);
+
+    for (const step of semanticPath.steps) {
+      let page = await logseq.Editor.getPage(step.title);
+      if (!page) {
+        page = await logseq.Editor.createPage(step.title, {});
+      }
+      if (!page) {
+        logseq.UI.showMsg(`无法创建页面: ${step.title}`);
+        continue;
+      }
+      const linkedContent = noteGenerator.autoLink(step.content, new Map(semanticPath.steps.map((n: Note) => [n.title, n])));
+      await logseq.Editor.appendBlockInPage(page.uuid, linkedContent);
+    }
+
+    logseq.UI.showMsg('语义路径生成成功!', 'success');
+  } catch (error: any) {
+    logseq.UI.showMsg(`语义路径生成失败: ${error.message}`);
   }
 }
 

@@ -2,6 +2,7 @@
   "name": "longrn-learning-path-system",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "终生学习者智能学习路径系统开发工作区，包含 Obsidian 与 Logseq 插件原型。",
   "main": "src/obsidian-plugin/main.ts",
   "scripts": {
@@ -20,6 +21,7 @@
   },
   "dependencies": {
     "@logseq/libs": "^0.0.17",
+    "onnxruntime-node": "^1.24.3",
     "uuid": "^9.0.1"
   }
 }

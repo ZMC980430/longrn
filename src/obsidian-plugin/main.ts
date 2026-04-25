@@ -1,7 +1,7 @@
 import { Plugin, Notice } from 'obsidian';
-import { KnowledgeBaseBuilder, Note } from '../core/knowledge-builder';
-import { PathPlanner } from '../core/path-planner';
-import { NoteGenerator } from '../core/note-generator';
+import { KnowledgeBaseBuilder, Note } from '../core/knowledge-builder.js';
+import { PathPlanner } from '../core/path-planner.js';
+import { NoteGenerator } from '../core/note-generator.js';
 
 export default class LearningPathPlugin extends Plugin {
   app: any;
@@ -21,6 +21,12 @@ export default class LearningPathPlugin extends Plugin {
       name: '生成学习路径',
       callback: () => void this.generateLearningPath(),
     });
+
+    this.addCommand({
+      id: 'generate-semantic-path',
+      name: '语义生成学习路径',
+      callback: () => void this.generateSemanticPath(),
+    });
   }
 
   async buildKnowledgeBase(): Promise<Map<string, Note>> {
@@ -29,9 +35,9 @@ export default class LearningPathPlugin extends Plugin {
 
     for (const file of files) {
       const content = await this.app.vault.read(file);
-      const parsed = this.kbBuilder.parseNote(content);
+      const parsed = this.kbBuilder.parseNote(content, file.basename);
       notes.push({
-        id: file.path, // Use path as id for simplicity
+        id: file.path,
         title: parsed.title || file.basename,
         path: file.path,
         content,
@@ -52,8 +58,7 @@ export default class LearningPathPlugin extends Plugin {
       const notes = Array.from((await this.buildKnowledgeBase()).values());
       const graph = this.kbBuilder.buildGraph(notes);
 
-      // For demo, target is hardcoded; in real, prompt user
-      const target = 'Python数据分析'; // Example target
+      const target = 'Python数据分析';
       const paths = this.pathPlanner.planPath(target, graph);
 
       if (paths.length === 0) {
@@ -61,14 +66,52 @@ export default class LearningPathPlugin extends Plugin {
         return;
       }
 
-      const selectedPath = paths[0]; // Select quick path
-
+      const selectedPath = paths[0];
       const vaultPath = this.app.vault.adapter.basePath;
       await this.noteGenerator.generateNotes(selectedPath.steps, vaultPath);
 
       new Notice('学习路径笔记生成完成！');
     } catch (error: any) {
       new Notice(`生成失败: ${error.message}`);
+    }
+  }
+
+  // ===== Phase 2: Semantic Path =====
+
+  async generateSemanticPath() {
+    new Notice('开始分析您的知识库...');
+
+    try {
+      const notes = Array.from((await this.buildKnowledgeBase()).values());
+
+      // Generate embeddings with progress
+      new Notice('正在生成语义索引（首次较慢，约需下载模型）...');
+      const vaultPath = this.app.vault.adapter.basePath;
+      await this.kbBuilder.embedAll(notes, vaultPath);
+      new Notice(`语义索引完成！共 ${notes.length} 条笔记`);
+
+      const graph = this.kbBuilder.buildGraph(notes);
+
+      // For now, use a natural language query; future: Modal input
+      const query = '数据分析';
+      const engine = this.kbBuilder.getEmbeddingEngine();
+      if (!engine) throw new Error('Embedding engine not ready');
+
+      new Notice('正在搜索最相关概念并生成路径...');
+      const semanticPath = await this.pathPlanner.semanticPath(
+        query,
+        graph,
+        engine,
+      );
+
+      await this.noteGenerator.generateNotes(semanticPath.steps, vaultPath);
+
+      const stepsPreview = semanticPath.steps
+        .map((s, i) => `${i + 1}. ${s.title} (${(semanticPath.scores?.[i] ?? 0).toFixed(3)})`)
+        .join(', ');
+      new Notice(`语义路径生成完成！\n${stepsPreview}`);
+    } catch (error: any) {
+      new Notice(`语义路径生成失败: ${error.message}`);
     }
   }
 

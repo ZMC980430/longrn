@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Note } from './knowledge-builder';
+import { Note } from './knowledge-builder.js';
 
 export class NoteGenerator {
   generateNote(step: Note, template: string = '# ${title}\n\n${content}\n\n相关：${links}'): string {
