@@ -2,20 +2,40 @@ import '@logseq/libs';
 import { KnowledgeBaseBuilder, Note } from '../core/knowledge-builder.js';
 import { PathPlanner } from '../core/path-planner.js';
 import { NoteGenerator } from '../core/note-generator.js';
+import { LearningStateManager } from '../core/learning-state-manager.js';
+import { FSRSScheduler } from '../core/fsrs-scheduler.js';
+import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
 
 async function main() {
-  console.log('Logseq Learning Path Plugin loaded');
+  console.log('Logseq Learning Path Plugin loaded (Phase 3)');
 
   const kbBuilder = new KnowledgeBaseBuilder();
   const pathPlanner = new PathPlanner();
   const noteGenerator = new NoteGenerator();
+  const fsrsScheduler = new FSRSScheduler();
+  const semanticLinker = new SemanticAutoLinker();
 
+  // Phase 1
   logseq.Editor.registerSlashCommand('生成学习路径', async () => {
     await generateLearningPath(kbBuilder, pathPlanner, noteGenerator);
   });
 
+  // Phase 2
   logseq.Editor.registerSlashCommand('语义生成学习路径', async () => {
     await generateSemanticPath(kbBuilder, pathPlanner, noteGenerator);
+  });
+
+  // Phase 3
+  logseq.Editor.registerSlashCommand('状态感知学习路径', async () => {
+    await generateStateAwarePath(kbBuilder, pathPlanner, noteGenerator, fsrsScheduler);
+  });
+
+  logseq.Editor.registerSlashCommand('查看学习统计', async () => {
+    await showLearningStats(kbBuilder);
+  });
+
+  logseq.Editor.registerSlashCommand('生成复习笔记', async () => {
+    await generateReviewNote(kbBuilder, noteGenerator, fsrsScheduler);
   });
 }
 
@@ -114,6 +134,130 @@ async function generateSemanticPath(kbBuilder: KnowledgeBaseBuilder, pathPlanner
     logseq.UI.showMsg('语义路径生成成功!', 'success');
   } catch (error: any) {
     logseq.UI.showMsg(`语义路径生成失败: ${error.message}`);
+  }
+}
+
+// ===== Phase 3: State-Aware Path & Review =====
+
+async function generateStateAwarePath(
+  kbBuilder: KnowledgeBaseBuilder,
+  pathPlanner: PathPlanner,
+  noteGenerator: NoteGenerator,
+  fsrsScheduler: FSRSScheduler,
+) {
+  try {
+    logseq.UI.showMsg('开始分析知识库（状态感知模式）...');
+    const notes = Array.from((await buildKnowledgeBase(kbBuilder)).values());
+    const graph = kbBuilder.buildGraph(notes);
+
+    // Use a temp vault path for state persistence
+    const vaultPath = '/tmp/longrn-logseq';
+    const stateManager = new LearningStateManager(vaultPath);
+
+    const masteredSize = stateManager.getMasteredIds().size;
+    logseq.UI.showMsg(`已掌握 ${masteredSize} 个节点，将在路径中跳过`);
+
+    const target = 'Python数据分析';
+    const paths = pathPlanner.planPathWithState(target, graph, stateManager);
+
+    if (paths.length === 0) {
+      logseq.UI.showMsg('未找到学习路径。所有相关节点可能都已掌握！');
+      return;
+    }
+
+    const selectedPath = paths[0];
+
+    for (const step of selectedPath.steps) {
+      let page = await logseq.Editor.getPage(step.title);
+      if (!page) {
+        page = await logseq.Editor.createPage(step.title, {});
+      }
+      if (!page) {
+        logseq.UI.showMsg(`无法创建页面: ${step.title}`);
+        continue;
+      }
+      const linkedContent = noteGenerator.autoLink(step.content, new Map(selectedPath.steps.map((n: Note) => [n.title, n])));
+      await logseq.Editor.appendBlockInPage(page.uuid, linkedContent);
+
+      // Auto-mark as planned
+      stateManager.setStatus(step.id, 'planned');
+    }
+
+    const stepInfo = selectedPath.steps
+      .map((s, i) => `${s.title}[${selectedPath.states?.[i] ?? 'unknown'}]`)
+      .join(' → ');
+    logseq.UI.showMsg(`状态感知路径生成成功!\n${stepInfo}`, 'success');
+  } catch (error: any) {
+    logseq.UI.showMsg(`状态感知路径生成失败: ${error.message}`);
+  }
+}
+
+async function showLearningStats(kbBuilder: KnowledgeBaseBuilder) {
+  try {
+    const vaultPath = '/tmp/longrn-logseq';
+    const stateManager = new LearningStateManager(vaultPath);
+    const stats = stateManager.getReviewStats();
+    const dueCount = stateManager.getDueIds().length;
+
+    logseq.UI.showMsg(
+      `📊 学习统计\n` +
+      `已掌握: ${stats.mastered}  |  学习中: ${stats.inProgress}\n` +
+      `已计划: ${stats.planned}  |  待归档: ${stats.archived}\n` +
+      `今日待复习: ${dueCount}`,
+    );
+  } catch (error: any) {
+    logseq.UI.showMsg(`获取统计失败: ${error.message}`);
+  }
+}
+
+async function generateReviewNote(
+  kbBuilder: KnowledgeBaseBuilder,
+  noteGenerator: NoteGenerator,
+  fsrsScheduler: FSRSScheduler,
+) {
+  try {
+    logseq.UI.showMsg('准备复习内容...');
+
+    const vaultPath = '/tmp/longrn-logseq';
+    const stateManager = new LearningStateManager(vaultPath);
+    const notes = Array.from((await buildKnowledgeBase(kbBuilder)).values());
+
+    const dueIds = stateManager.getDueIds();
+    let reviewIds: string[];
+
+    if (dueIds.length === 0) {
+      // Quick review: pick 5 random mastered nodes
+      const masteredIds = [...stateManager.getMasteredIds()];
+      if (masteredIds.length === 0) {
+        logseq.UI.showMsg('没有可复习的内容。请先生成学习路径。');
+        return;
+      }
+      reviewIds = masteredIds.sort(() => Math.random() - 0.5).slice(0, 5);
+    } else {
+      reviewIds = dueIds.slice(0, 10);
+    }
+
+    // Create a review page
+    const pageTitle = `Review-${new Date().toISOString().slice(0, 10)}`;
+    let page = await logseq.Editor.getPage(pageTitle);
+    if (!page) {
+      page = await logseq.Editor.createPage(pageTitle, {});
+    }
+    if (!page) {
+      logseq.UI.showMsg('无法创建复习页面');
+      return;
+    }
+
+    for (const id of reviewIds) {
+      const note = notes.find(n => n.id === id);
+      if (!note) continue;
+      const reviewContent = fsrsScheduler.generateReviewTemplate(note.title, note.content, note.tags);
+      await logseq.Editor.appendBlockInPage(page.uuid, reviewContent);
+    }
+
+    logseq.UI.showMsg(`复习笔记创建完成（${reviewIds.length} 项）!`, 'success');
+  } catch (error: any) {
+    logseq.UI.showMsg(`生成复习笔记失败: ${error.message}`);
   }
 }
 

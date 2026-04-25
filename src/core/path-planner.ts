@@ -1,11 +1,13 @@
 import { Note, KnowledgeGraph } from './knowledge-builder.js';
 import { EmbeddingEngine } from './embedding-engine.js';
 import { ScoredNote } from './vector-store.js';
+import { LearningStateManager, LearningStatus } from './learning-state-manager.js';
 
 export interface Path {
   steps: Note[];
   type: 'quick' | 'deep' | 'semantic';
   scores?: number[];
+  states?: LearningStatus[];
 }
 
 export class PathPlanner {
@@ -17,6 +19,41 @@ export class PathPlanner {
     const deepPath = this.dfsPath(targetNode, graph, userKnowledge);
 
     return [quickPath, deepPath].filter(p => p.steps.length > 0);
+  }
+
+  /**
+   * Phase 3: 集成学习状态的路径规划
+   * - 排除 mastered 节点（除非用户显式要求）
+   * - 优先从 planned / in_progress 节点出发
+   * - 为每个步骤附加学习状态标记
+   */
+  planPathWithState(
+    target: string,
+    graph: KnowledgeGraph,
+    stateManager: LearningStateManager,
+    excludeMastered: boolean = true,
+  ): Path[] {
+    const targetNode = Array.from(graph.nodes.values()).find(n => n.title === target);
+    if (!targetNode) throw new Error('Target not found in graph');
+
+    const masteredIds = excludeMastered ? stateManager.getMasteredIds() : new Set<string>();
+    const userKnowledge = new Set<string>();
+    if (excludeMastered) {
+      for (const id of masteredIds) {
+        const node = graph.nodes.get(id);
+        if (node) userKnowledge.add(node.title);
+      }
+    }
+
+    const quickPath = this.bfsPath(targetNode, graph, userKnowledge);
+    const deepPath = this.dfsPath(targetNode, graph, userKnowledge);
+
+    const attachStates = (p: Path): Path => ({
+      ...p,
+      states: p.steps.map(s => stateManager.getStatus(s.id)),
+    });
+
+    return [quickPath, deepPath].filter(p => p.steps.length > 0).map(attachStates);
   }
 
   async semanticPath(
@@ -68,6 +105,32 @@ export class PathPlanner {
       steps: sorted,
       type: 'semantic',
       scores: sortedScores,
+    };
+  }
+
+  /**
+   * Phase 3: 语义路径 + 学习状态感知
+   */
+  async semanticPathWithState(
+    query: string,
+    graph: KnowledgeGraph,
+    embeddingEngine: EmbeddingEngine,
+    stateManager: LearningStateManager,
+    excludeMastered: boolean = true,
+  ): Promise<Path> {
+    const masteredIds = excludeMastered ? stateManager.getMasteredIds() : new Set<string>();
+    const userKnowledge = new Set<string>();
+    if (excludeMastered) {
+      for (const id of masteredIds) {
+        const node = graph.nodes.get(id);
+        if (node) userKnowledge.add(node.title);
+      }
+    }
+
+    const result = await this.semanticPath(query, graph, embeddingEngine, userKnowledge);
+    return {
+      ...result,
+      states: result.steps.map(s => stateManager.getStatus(s.id)),
     };
   }
 
