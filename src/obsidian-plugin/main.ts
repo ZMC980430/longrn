@@ -7,7 +7,11 @@ import { FSRSScheduler } from '../core/fsrs-scheduler.js';
 import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
 
 export default class LearningPathPlugin extends Plugin {
-  app: any;
+  /** Get vault base path (DataAdapter.basePath is not in public types) */
+  private get vaultBasePath(): string {
+    return (this.app.vault.adapter as any).basePath;
+  }
+
   kbBuilder!: KnowledgeBaseBuilder;
   pathPlanner!: PathPlanner;
   noteGenerator!: NoteGenerator;
@@ -26,7 +30,7 @@ export default class LearningPathPlugin extends Plugin {
 
     // Initialize state manager after vault is available
     this.app.workspace.onLayoutReady(() => {
-      const vaultPath = this.app.vault.adapter.basePath;
+      const vaultPath = this.vaultBasePath;
       this.stateManager = new LearningStateManager(vaultPath);
     });
 
@@ -105,7 +109,7 @@ export default class LearningPathPlugin extends Plugin {
       }
 
       const selectedPath = paths[0];
-      const vaultPath = this.app.vault.adapter.basePath;
+      const vaultPath = this.vaultBasePath;
       await this.noteGenerator.generateNotes(selectedPath.steps, vaultPath);
 
       new Notice('学习路径笔记生成完成！');
@@ -124,7 +128,7 @@ export default class LearningPathPlugin extends Plugin {
 
       // Generate embeddings with progress
       new Notice('正在生成语义索引（首次较慢，约需下载模型）...');
-      const vaultPath = this.app.vault.adapter.basePath;
+      const vaultPath = this.vaultBasePath;
       await this.kbBuilder.embedAll(notes, vaultPath);
       new Notice(`语义索引完成！共 ${notes.length} 条笔记`);
 
@@ -159,7 +163,7 @@ export default class LearningPathPlugin extends Plugin {
     new Notice('开始分析您的知识库（状态感知模式）...');
 
     try {
-      const vaultPath = this.app.vault.adapter.basePath;
+      const vaultPath = this.vaultBasePath;
       if (!this.stateManager) {
         this.stateManager = new LearningStateManager(vaultPath);
       }
@@ -198,7 +202,7 @@ export default class LearningPathPlugin extends Plugin {
 
   async showReviewList() {
     try {
-      const vaultPath = this.app.vault.adapter.basePath;
+      const vaultPath = this.vaultBasePath;
       if (!this.stateManager) {
         this.stateManager = new LearningStateManager(vaultPath);
       }
@@ -230,7 +234,7 @@ export default class LearningPathPlugin extends Plugin {
     new Notice('准备复习笔记...');
 
     try {
-      const vaultPath = this.app.vault.adapter.basePath;
+      const vaultPath = this.vaultBasePath;
       if (!this.stateManager) {
         this.stateManager = new LearningStateManager(vaultPath);
       }
