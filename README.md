@@ -1,5 +1,7 @@
 # Longrn: 终生学习者智能学习路径系统
 
+## 注意：本项目所有代码均由AI生成，未经人工核查所有内容，请谨慎使用！
+
 项目目标
 
 Longrn 旨在为终生学习者提供智能学习路径生成与结构化笔记功能，深度集成 Obsidian 与 Logseq。仓库采用 SDD 驱动开发（SDD-driven development），详细设计与实现说明请参见 docs/SDD.md。
