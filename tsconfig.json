@@ -15,6 +15,7 @@
   "include": ["src/**/*.ts"],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "src/obsidian-plugin"
   ]
 }

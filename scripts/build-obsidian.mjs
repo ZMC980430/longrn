@@ -20,16 +20,11 @@ async function build() {
   // 确保输出目录存在
   mkdirSync(outDir, { recursive: true });
 
-  // 1. 清除 tsc 输出的多余文件（Obsidian 只需要 esbuild 打包的 main.js）
-  const tscFiles = readdirSync(outDir).filter(f =>
-    f.endsWith('.d.ts') || f.endsWith('.js.map')
-  );
-  for (const f of tscFiles) {
-    rmSync(join(outDir, f));
+  // 1. 清除目录中的所有现有文件，确保 tsc 旧输出不会混淆
+  for (const f of readdirSync(outDir)) {
+    rmSync(join(outDir, f), { recursive: true });
   }
-  if (tscFiles.length > 0) {
-    console.log(`   Cleaned ${tscFiles.length} tsc-generated files from output`);
-  }
+  console.log('   Cleaned output directory');
 
   // 2. 用 esbuild 打包 Obsidian 插件
   await esbuild.build({
