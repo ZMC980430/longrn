@@ -16,18 +16,30 @@
  */
 
 export interface CardState {
-  stability: number;    // 记忆稳定性（天数）
-  easeFactor: number;   // 难度因子 [1.3, 10]
-  reviewCount: number;  // 累计复习次数
+  /** Memory stability in days — how long until retention drops to ~90% */
+  stability: number;
+  /** Ease factor in [1.3, 10] — higher = easier to retain */
+  easeFactor: number;
+  /** Total number of reviews performed */
+  reviewCount: number;
 }
 
 export interface ScheduledResult extends CardState {
-  intervalDays: number; // 下次复习间隔（天数）
+  /** Days until the next review */
+  intervalDays: number;
 }
 
+/** Desired retention rate (90%) — used to compute review intervals. */
 const RETENTION = 0.9;
 
 export class FSRSScheduler {
+  /**
+   * Computes the next review schedule based on the user's rating.
+   *
+   * @param rating - 1=Again (forgot), 2=Hard, 3=Good, 4=Easy
+   * @param current - Current card state (stability, easeFactor, reviewCount)
+   * @returns Updated state with next review interval
+   */
   schedule(rating: 1 | 2 | 3 | 4, current: CardState): ScheduledResult {
     const { stability, easeFactor, reviewCount } = current;
     const isFirstReview = stability <= 0;
@@ -48,12 +60,12 @@ export class FSRSScheduler {
 
     // Rating-based interval adjustment
     if (rating === 1) {
-      intervalDays = Math.min(intervalDays, 1);   // Again: within 1 day
+      intervalDays = Math.min(intervalDays, 1);
     } else if (rating === 2) {
-      intervalDays = Math.max(intervalDays * 0.5, 0.1); // Hard: half the interval
+      intervalDays = Math.max(intervalDays * 0.5, 0.1);
     }
 
-    // Clamp
+    // Clamp to safe bounds
     intervalDays = Math.max(0.01, Math.min(365, intervalDays));
     newEaseFactor = Math.max(1.3, Math.min(10, newEaseFactor));
 
@@ -65,13 +77,13 @@ export class FSRSScheduler {
     };
   }
 
-  /** 首次复习初始稳定性 */
+  /** Initial stability for first review. Again=0.1d, Hard=0.5d, Good=1d, Easy=3d. */
   private initialStability(rating: 1 | 2 | 3 | 4): number {
     const map: Record<number, number> = { 1: 0.1, 2: 0.5, 3: 1.0, 4: 3.0 };
     return map[rating];
   }
 
-  /** 首次复习初始难度因子 */
+  /** Initial ease factor. Again=3.0, Hard=2.7, Good=2.5, Easy=2.2. */
   private initialEaseFactor(rating: 1 | 2 | 3 | 4): number {
     const base = 2.5;
     const map: Record<number, number> = { 1: base + 0.5, 2: base + 0.2, 3: base, 4: base - 0.3 };
@@ -79,8 +91,8 @@ export class FSRSScheduler {
   }
 
   /**
-   * 后续复习稳定性: S' = S * (1 + 0.15 * EF^0.8) * rf
-   * 其中 rf 是评分因子: Again=0.4, Hard=0.6, Good=1.3, Easy=2.5
+   * Subsequent review stability: S' = S * (1 + 0.15 * EF^0.8) * ratingFactor.
+   * ratingFactor: Again=0.4, Hard=0.6, Good=1.3, Easy=2.5.
    */
   private nextStability(rating: 1 | 2 | 3 | 4, stability: number, easeFactor: number): number {
     const rf: Record<number, number> = { 1: 0.4, 2: 0.6, 3: 1.3, 4: 2.5 };
@@ -89,32 +101,36 @@ export class FSRSScheduler {
   }
 
   /**
-   * 后续复习难度因子: EF' = EF + 0.3 * (3 - rating)
-   * Again(r=1): EF += 0.6  (更困难)
-   * Hard(r=2): EF += 0.3
-   * Good(r=3): EF unchanged
-   * Easy(r=4): EF -= 0.3  (更简单)
+   * Subsequent ease factor: EF' = EF + 0.3 * (3 - rating).
+   * Again(r=1): EF += 0.6 (harder). Hard(r=2): EF += 0.3.
+   * Good(r=3): unchanged. Easy(r=4): EF -= 0.3 (easier).
    */
   private nextEaseFactor(rating: 1 | 2 | 3 | 4, currentEase: number): number {
     return currentEase + 0.3 * (3 - rating);
   }
 
   /**
-   * 计算间隔: I = S * ln(R) / ln(0.5)
-   * 当 R=0.9 时, ln(0.9)/ln(0.5) ≈ 0.152
+   * Computes the review interval from memory stability.
+   * I = S * ln(retention) / ln(0.5)
+   * For R=90%: ln(0.9)/ln(0.5) ≈ 0.152
    */
   private calculateInterval(stability: number, retention: number): number {
     return stability * Math.log(retention) / Math.log(0.5);
   }
 
   /**
-   * 给定稳定性和经过天数，计算记忆保留率 R = 0.5^(t/S)
+   * Estimates memory retention given stability and elapsed time.
+   * R = 0.5^(t/S)
    */
   getRetention(stability: number, elapsedDays: number): number {
     if (stability <= 0) return 0;
     return Math.pow(0.5, elapsedDays / stability);
   }
 
+  /**
+   * Generates a Markdown review note template.
+   * Includes the note content excerpt and scoring checkboxes.
+   */
   generateReviewTemplate(noteTitle: string, noteContent: string, noteTags: string[]): string {
     const tags = noteTags.map(t => `#${t}`).join(' ');
     return [

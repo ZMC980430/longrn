@@ -2,7 +2,23 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Note } from './knowledge-builder.js';
 
+/**
+ * Generates structured Markdown notes and auto-links them.
+ *
+ * Two linking strategies:
+ * 1. **Exact match** (`autoLink`): longest-title-first regex replacement.
+ * 2. **Batch generation** (`generateNotes`): creates numbered note files
+ *    under a `learning-path/` subfolder.
+ */
 export class NoteGenerator {
+  /**
+   * Renders a note using a Mustache-like template.
+   * Available placeholders: ${title}, ${content}, ${links}.
+   *
+   * @param step - The note data to render
+   * @param template - Optional custom template; defaults to:
+   *   `# ${title}\n\n${content}\n\n相关：${links}`
+   */
   generateNote(step: Note, template: string = '# ${title}\n\n${content}\n\n相关：${links}'): string {
     return template
       .replace('${title}', step.title)
@@ -10,6 +26,11 @@ export class NoteGenerator {
       .replace('${links}', step.links.map(l => `[[${l}]]`).join(' '));
   }
 
+  /**
+   * Auto-links content by replacing bare note titles with [[wikilinks]].
+   * Uses longest-match-first to avoid partial replacements
+   * (e.g. "TypeScript" won't break "TypeScript Handbook").
+   */
   autoLink(content: string, knowledgeBase: Map<string, Note>): string {
     let processedContent = content;
     const titles = Array.from(knowledgeBase.values()).map(n => n.title).sort((a, b) => b.length - a.length);
@@ -24,10 +45,16 @@ export class NoteGenerator {
     return processedContent;
   }
 
+  /** Escapes special regex characters in a string. */
   private escapeRegExp(string: string): string {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
+  /**
+   * Batch-generates note files for a learning path.
+   * Files are created under `<vaultPath>/learning-path/` and numbered.
+   * Each note is auto-linked against all other notes in the path.
+   */
   async generateNotes(pathSteps: Note[], vaultPath: string, template?: string): Promise<void> {
     const outputDir = path.join(vaultPath, 'learning-path');
     if (!fs.existsSync(outputDir)) {

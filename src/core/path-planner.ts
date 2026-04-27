@@ -3,14 +3,38 @@ import { EmbeddingEngine } from './embedding-engine.js';
 import { ScoredNote } from './vector-store.js';
 import { LearningStateManager, LearningStatus } from './learning-state-manager.js';
 
+/**
+ * A recommended learning path consisting of ordered steps (notes).
+ */
 export interface Path {
+  /** Ordered list of notes from foundational to target */
   steps: Note[];
+  /** Algorithm type: quick (BFS), deep (DFS), or semantic (embedding-based) */
   type: 'quick' | 'deep' | 'semantic';
+  /** Semantic similarity scores corresponding to each step (only for semantic paths) */
   scores?: number[];
+  /** Learning status of each step (only populated by state-aware methods) */
   states?: LearningStatus[];
 }
 
+/**
+ * Generates learning paths through a knowledge graph.
+ *
+ * Supports three path strategies:
+ * - **planPath** — BFS (quick) and DFS (deep) from a named target.
+ * - **semanticPath** — Finds the most semantically relevant target from a query,
+ *   then builds a path and re-ranks steps by similarity.
+ * - **planPathWithState / semanticPathWithState** — Same as above but integrates
+ *   LearningStateManager to exclude mastered nodes and attach status labels.
+ */
 export class PathPlanner {
+  /**
+   * Generates both a quick (BFS) and deep (DFS) learning path to a target.
+   * @param target - Title of the target note
+   * @param graph - The knowledge graph
+   * @param userKnowledge - Titles of notes the user already knows (will be skipped)
+   * @returns Array of one or more non-empty Paths
+   */
   planPath(target: string, graph: KnowledgeGraph, userKnowledge: Set<string> = new Set()): Path[] {
     const targetNode = Array.from(graph.nodes.values()).find(n => n.title === target);
     if (!targetNode) throw new Error('Target not found in graph');
@@ -22,10 +46,9 @@ export class PathPlanner {
   }
 
   /**
-   * Phase 3: 集成学习状态的路径规划
-   * - 排除 mastered 节点（除非用户显式要求）
-   * - 优先从 planned / in_progress 节点出发
-   * - 为每个步骤附加学习状态标记
+   * Phase 3: State-aware path planning.
+   * - Excludes mastered nodes (unless `excludeMastered` is false).
+   * - Attaches each step's learning status.
    */
   planPathWithState(
     target: string,
@@ -56,13 +79,18 @@ export class PathPlanner {
     return [quickPath, deepPath].filter(p => p.steps.length > 0).map(attachStates);
   }
 
+  /**
+   * Phase 2: Semantic path planning using a natural-language query.
+   * 1. Embeds the query and finds the top-5 most similar notes.
+   * 2. Runs BFS from the best match.
+   * 3. Re-ranks steps by semantic similarity to the query.
+   */
   async semanticPath(
     query: string,
     graph: KnowledgeGraph,
     embeddingEngine: EmbeddingEngine,
     userKnowledge: Set<string> = new Set(),
   ): Promise<Path> {
-    // 1. Semantically search for the best target node
     const queryEmb = await embeddingEngine.embed(query);
     const notes = Array.from(graph.nodes.values());
     const scored = notes
@@ -78,18 +106,15 @@ export class PathPlanner {
 
     const targetNode = scored[0].note;
 
-    // 2. BFS to get connected steps
     const bfsResult = this.bfsPath(targetNode, graph, userKnowledge);
 
     if (bfsResult.steps.length <= 1) return bfsResult;
 
-    // 3. Sort by semantic similarity to query
     const scores = bfsResult.steps.map(step => {
       if (!step.embeddings) return 0;
       return EmbeddingEngine.cosineSimilarity(queryEmb, step.embeddings);
     });
 
-    // Keep target first, sort the rest by similarity
     const first = bfsResult.steps[0];
     const rest = bfsResult.steps.slice(1);
     const indexed = rest.map((step, i) => ({ step, score: scores[i + 1] }));
@@ -109,7 +134,8 @@ export class PathPlanner {
   }
 
   /**
-   * Phase 3: 语义路径 + 学习状态感知
+   * Phase 3: Semantic path + state awareness.
+   * Combines semanticPath() with LearningStateManager.
    */
   async semanticPathWithState(
     query: string,
@@ -134,6 +160,10 @@ export class PathPlanner {
     };
   }
 
+  /**
+   * BFS traversal from start node.
+   * Produces a "quick" path: broad exploration, shortest dependency chain.
+   */
   private bfsPath(start: Note, graph: KnowledgeGraph, userKnowledge: Set<string>): Path {
     const queue: Note[] = [start];
     const visited = new Set<string>();
@@ -158,6 +188,10 @@ export class PathPlanner {
     return { steps: path, type: 'quick' };
   }
 
+  /**
+   * DFS traversal from start node.
+   * Produces a "deep" path: dives deep into one branch before backtracking.
+   */
   private dfsPath(start: Note, graph: KnowledgeGraph, userKnowledge: Set<string>): Path {
     const stack: Note[] = [start];
     const visited = new Set<string>();

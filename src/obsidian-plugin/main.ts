@@ -6,6 +6,18 @@ import { LearningStateManager } from '../core/learning-state-manager.js';
 import { FSRSScheduler } from '../core/fsrs-scheduler.js';
 import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
 
+/**
+ * Longrn — Obsidian plugin entry point.
+ *
+ * Registers six commands across three phases:
+ * - **Phase 1**: `generate-learning-path` (BFS/DFS path planning)
+ * - **Phase 2**: `generate-semantic-path` (embedding-based path planning)
+ * - **Phase 3**: `generate-state-aware-path`, `show-review-list`,
+ *   `generate-review-note` (learning state + FSRS review scheduling)
+ *
+ * Also adds a **Setting tab** that documents the plugin's features,
+ * learning state model, and usage instructions.
+ */
 export default class LearningPathPlugin extends Plugin {
   /** Get vault base path (DataAdapter.basePath is not in public types) */
   private get vaultBasePath(): string {

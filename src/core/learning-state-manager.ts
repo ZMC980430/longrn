@@ -2,8 +2,17 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { FSRSScheduler, CardState } from './fsrs-scheduler.js';
 
+/**
+ * Learning status for a knowledge node.
+ * - unknown:     Not yet encountered
+ * - planned:     Added to a learning path
+ * - in_progress: Currently being studied
+ * - mastered:    Reviewed successfully (rating >= 3)
+ * - archived:    Long unreviewed — may need re-learning
+ */
 export type LearningStatus = 'unknown' | 'planned' | 'in_progress' | 'mastered' | 'archived';
 
+/** Persisted state for a single knowledge node. */
 export interface LearningState {
   noteId: string;
   status: LearningStatus;
@@ -14,16 +23,29 @@ export interface LearningState {
   stability: number;
 }
 
+/** Persisted state index — stored as JSON at `.longrn/state.json`. */
 export interface StateIndex {
   updatedAt: string;
   entries: Record<string, LearningState>;
 }
 
+/**
+ * Manages learning states for all knowledge graph nodes.
+ *
+ * Features:
+ * - Five-state lifecycle (unknown → planned → in_progress → mastered → archived)
+ * - Automatic persistence to `<vaultPath>/.longrn/state.json`
+ * - Integration with FSRSScheduler for spaced repetition review scheduling
+ * - Batch queries: getMasteredIds, getPlannedIds, getStaleIds, getDueIds
+ */
 export class LearningStateManager {
   private statePath: string;
   public index: StateIndex;
   private scheduler: FSRSScheduler;
 
+  /**
+   * @param vaultPath - Vault root path; state file stored at `.longrn/state.json`
+   */
   constructor(vaultPath: string) {
     const storeDir = path.join(vaultPath, '.longrn');
     if (!fs.existsSync(storeDir)) {
@@ -35,6 +57,7 @@ export class LearningStateManager {
     this.loadState();
   }
 
+  /** Loads persisted states from disk. Returns false if no state file exists. */
   loadState(): boolean {
     try {
       if (!fs.existsSync(this.statePath)) return false;
@@ -46,11 +69,13 @@ export class LearningStateManager {
     }
   }
 
+  /** Persists the current state index to disk. */
   saveState(): void {
     this.index.updatedAt = new Date().toISOString();
     fs.writeFileSync(this.statePath, JSON.stringify(this.index, null, 2));
   }
 
+  /** Ensures a state entry exists for the given note ID, creating it if absent. */
   private ensureEntry(noteId: string): LearningState {
     if (!this.index.entries[noteId]) {
       this.index.entries[noteId] = {
@@ -64,6 +89,7 @@ export class LearningStateManager {
     return this.index.entries[noteId];
   }
 
+  /** Sets the learning status for a node. */
   setStatus(noteId: string, status: LearningStatus): void {
     const entry = this.ensureEntry(noteId);
     entry.status = status;
@@ -73,10 +99,12 @@ export class LearningStateManager {
     this.saveState();
   }
 
+  /** Returns the current learning status of a node (defaults to 'unknown'). */
   getStatus(noteId: string): LearningStatus {
     return this.index.entries[noteId]?.status ?? 'unknown';
   }
 
+  /** Returns a Set of note IDs with status 'mastered' or 'archived'. */
   getMasteredIds(): Set<string> {
     return new Set(
       Object.entries(this.index.entries)
@@ -85,6 +113,7 @@ export class LearningStateManager {
     );
   }
 
+  /** Returns a Set of note IDs with status 'planned' or 'in_progress'. */
   getPlannedIds(): Set<string> {
     return new Set(
       Object.entries(this.index.entries)
@@ -93,6 +122,10 @@ export class LearningStateManager {
     );
   }
 
+  /**
+   * Returns IDs of nodes whose nextReviewAt is older than `days` ago.
+   * Useful for identifying nodes that are overdue for review.
+   */
   getStaleIds(days: number): string[] {
     const cutoff = Date.now() - days * 86400_000;
     return Object.entries(this.index.entries)
@@ -103,6 +136,11 @@ export class LearningStateManager {
       .map(([id]) => id);
   }
 
+  /**
+   * Records a review rating for a note and updates FSRS scheduling.
+   * @param rating - 1=Again 2=Hard 3=Good 4=Easy
+   * @returns The updated CardState from the FSRS scheduler
+   */
   recordReview(noteId: string, rating: 1 | 2 | 3 | 4): CardState {
     const entry = this.ensureEntry(noteId);
     const current: CardState = {
@@ -117,7 +155,6 @@ export class LearningStateManager {
     entry.reviewCount = next.reviewCount;
     entry.lastReviewedAt = new Date().toISOString();
 
-    // Next review = now + interval days
     const intervalMs = next.intervalDays * 86400_000;
     entry.nextReviewAt = new Date(Date.now() + intervalMs).toISOString();
 
@@ -131,6 +168,7 @@ export class LearningStateManager {
     return next;
   }
 
+  /** Returns IDs of nodes whose nextReviewAt is due (now or in the past). */
   getDueIds(): string[] {
     const now = Date.now();
     return Object.entries(this.index.entries)
@@ -141,6 +179,7 @@ export class LearningStateManager {
       .map(([id]) => id);
   }
 
+  /** Returns aggregate review statistics. */
   getReviewStats(): { total: number; mastered: number; planned: number; inProgress: number; archived: number } {
     const stats = { total: 0, mastered: 0, planned: 0, inProgress: 0, archived: 0 };
     for (const s of Object.values(this.index.entries)) {
@@ -155,6 +194,7 @@ export class LearningStateManager {
     return stats;
   }
 
+  /** Returns all state entries (read-only snapshot). */
   getAllStates(): Record<string, LearningState> {
     return this.index.entries;
   }
