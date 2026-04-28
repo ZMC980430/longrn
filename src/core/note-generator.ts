@@ -52,11 +52,21 @@ export class NoteGenerator {
 
   /**
    * Batch-generates note files for a learning path.
-   * Files are created under `<vaultPath>/learning-path/` and numbered.
+   * Files are created under `<vaultPath>/<outputSubfolder>` and numbered.
    * Each note is auto-linked against all other notes in the path.
+   *
+   * @param pathSteps - Ordered notes in the learning path
+   * @param vaultPath - Absolute path to the vault root
+   * @param template - Optional custom note template
+   * @param outputSubfolder - Subfolder name for output (default: 'learning-path')
    */
-  async generateNotes(pathSteps: Note[], vaultPath: string, template?: string): Promise<void> {
-    const outputDir = path.join(vaultPath, 'learning-path');
+  async generateNotes(
+    pathSteps: Note[],
+    vaultPath: string,
+    template?: string,
+    outputSubfolder: string = 'learning-path',
+  ): Promise<void> {
+    const outputDir = path.join(vaultPath, outputSubfolder);
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
@@ -66,7 +76,7 @@ export class NoteGenerator {
       let content = this.generateNote(step, template);
       content = this.autoLink(content, new Map(pathSteps.map(n => [n.title, n])));
 
-      const fileName = `${i + 1}-${step.title.replace(/[^a-zA-Z0-9]/g, '-')}.md`;
+      const fileName = `${i + 1}-${step.title.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '-')}.md`;
       fs.writeFileSync(path.join(outputDir, fileName), content);
     }
   }

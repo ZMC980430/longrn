@@ -181,7 +181,31 @@
 4. 增强 PathPlanner：集成学习状态，排除已掌握节点，附加状态标记。
 5. 编写单元测试与集成测试 — 6 组验证全部通过。
 
-### 6.4 后续迭代
+### 6.4 Phase 3.1（已完成）—— 去除硬编码与插件可运行化
+
+**背景**：Phase 3 的 Obsidian 插件中包含大量硬编码内容（目标主题、查询文本、复习数量等），仅用于验证流程可走通，无法作为独立插件正常使用。
+
+**改造内容**：
+1. **新增 `TargetInputModal`**：弹出式文本输入框，用户在运行路径生成命令时可自由输入学习目标或语义查询文本，替代硬编码的 `'Python数据分析'` 和 `'数据分析'`。
+2. **新增插件设置系统**（`LongrnPluginSettings`）：
+   - `semanticThreshold`（语义相似度阈值，默认 0.75）
+   - `quickReviewCount`（快速复习节点数，默认 5）
+   - `dueReviewLimit`（每日复习上限，默认 10）
+   - `outputFolder`（笔记输出目录，默认 `learning-path`）
+3. **升级 `LongrnSettingTab`**：从纯说明页面变为可交互设置页，支持滑块和文本输入调整上述参数。
+4. **修复 `generateReviewNote`**：
+   - 使用 `app.vault.createFolder` / `app.vault.create` 替代裸 `fs` 操作
+   - 复习数量改用设置项 `quickReviewCount` / `dueReviewLimit`
+   - 复习笔记输出到可配置的 `outputFolder` 子目录
+5. **更新 `note-generator.ts`**：`generateNotes` 方法新增可选参数 `outputSubfolder`，支持自定义输出目录。文件名正则支持中文字符。
+6. **优化状态管理初始化**：新增 `ensureStateManager()` 延迟初始化方法，确保 `onLayoutReady` 回调未触发时也能正常使用。
+
+**验证**：
+- `npm run build` 编译通过
+- `npm run build:obsidian` esbuild 打包成功（54KB）
+- `node scripts/phase3-test.mjs` 全部 6 组测试通过
+
+### 6.5 后续迭代
 
 1. Phase 4：本地大模型集成（Llama.cpp 等离线推理引擎）。
 2. Phase 5：Canvas 集成、多领域知识图谱、CLI 工具。
@@ -195,4 +219,4 @@
 
 ## 8. 备注
 
-Phase 1、Phase 2、Phase 3 均已实现并通过验证。Phase 4 待规划开发。
+Phase 1、Phase 2、Phase 3、Phase 3.1 均已实现并通过验证。Phase 4 待规划开发。
