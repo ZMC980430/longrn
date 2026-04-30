@@ -261,7 +261,7 @@ export default class LearningPathPlugin extends Plugin {
     // Phase 5
     this.addCommand({
       id: 'generate-ai-learning-path',
-      name: '生成学习路径（AI版·需配置LLM）',
+      name: 'AI 生成学习路径（通用 OpenAI 协议）',
       callback: () => void this.generateAILearningPath(),
     });
 
@@ -842,8 +842,14 @@ class LongrnSettingTab extends PluginSettingTab {
 					});
 			});
 
-		// ===== Phase 5: AI 生成配置 =====
+		// ===== Phase 5: AI 内容生成（通用 OpenAI 协议） =====
 		containerEl.createEl('h2', { text: '🤖 AI 内容生成（Phase 5）' });
+
+		containerEl.createEl('p', {
+			text: '支持所有兼容 OpenAI Chat Completions API 的大模型服务，包括但不限于：' +
+				'OpenAI、Ollama（本地）、vLLM、DeepSeek、Qwen（通义千问）、' +
+				'Claude（通过 API 代理）、Azure OpenAI、Groq、Together AI 等。',
+		});
 
 		new Setting(containerEl)
 			.setName('启用 AI 生成')
@@ -859,7 +865,7 @@ class LongrnSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('API 端点')
-			.setDesc('OpenAI 兼容 API 地址。默认：https://api.openai.com/v1。Ollama 本地：http://localhost:11434/v1')
+			.setDesc('通用 OpenAI 协议 API 地址。填写你使用的服务商提供的 endpoint，必须以 /v1 结尾。常见示例：')
 			.addText((text) => {
 				text
 					.setPlaceholder('https://api.openai.com/v1')
@@ -870,9 +876,34 @@ class LongrnSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// 常见端点参考
+		const endpointHelp = containerEl.createEl('details');
+		endpointHelp.createEl('summary', { text: '📋 常见 API 端点参考' });
+		const epTable = endpointHelp.createEl('table');
+		epTable.createEl('thead').createEl('tr', {}, (tr) => {
+			tr.createEl('th', { text: '服务商' });
+			tr.createEl('th', { text: 'API 端点' });
+		});
+		const epTbody = epTable.createEl('tbody');
+		const endpoints = [
+			{ service: 'OpenAI', endpoint: 'https://api.openai.com/v1' },
+			{ service: 'DeepSeek', endpoint: 'https://api.deepseek.com/v1' },
+			{ service: 'Qwen（通义千问）', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+			{ service: 'Groq', endpoint: 'https://api.groq.com/openai/v1' },
+			{ service: 'Together AI', endpoint: 'https://api.together.xyz/v1' },
+			{ service: 'Ollama（本地）', endpoint: 'http://localhost:11434/v1' },
+			{ service: 'vLLM（自部署）', endpoint: 'http://localhost:8000/v1' },
+		];
+		for (const ep of endpoints) {
+			epTbody.createEl('tr', {}, (tr) => {
+				tr.createEl('td', { text: ep.service });
+				tr.createEl('td', { text: ep.endpoint });
+			});
+		}
+
 		new Setting(containerEl)
 			.setName('API Key')
-			.setDesc('你的 API Key。注意：该 Key 仅保存在本地插件设置中，不会上传到别处。')
+			.setDesc('你的 API Key。注意：该 Key 仅保存在本地插件设置中，不会上传到别处。Ollama 等本地服务可留空。')
 			.addText((text) => {
 				text
 					.setPlaceholder('sk-...')
@@ -885,7 +916,7 @@ class LongrnSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('模型')
-			.setDesc('模型名称，如 gpt-4o-mini、gpt-4o、deepseek-chat、qwen-turbo 等')
+			.setDesc('模型名称，取决于你使用的服务商。示例：gpt-4o-mini、deepseek-chat、qwen-turbo、llama3.1（Ollama）等')
 			.addText((text) => {
 				text
 					.setPlaceholder('gpt-4o-mini')
@@ -948,8 +979,8 @@ class LongrnSettingTab extends PluginSettingTab {
 				desc: 'Phase 4: 输入主题直接生成完整学习路径笔记树，无需 Vault 中已有笔记。',
 			},
 			{
-				name: '生成学习路径（AI版·需配置LLM）',
-				desc: 'Phase 5: 使用大模型生成真实的笔记内容，需先在设置中配置 LLM 信息。',
+				name: 'AI 生成学习路径（通用 OpenAI 协议）',
+				desc: 'Phase 5: 使用大模型生成真实的笔记内容，支持所有 OpenAI 兼容协议的大模型服务。',
 			},
 		];
 

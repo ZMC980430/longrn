@@ -290,17 +290,28 @@ Phase 4 扩展插件设置项：
 - 笔记间 `[[wikilink]]` 交叉引用正确
 - 重复生成不覆盖已有笔记
 
-### 6.6 Phase 5（规划中）—— AI 内容生成（OpenAI API）
+### 6.6 Phase 5（规划中）—— AI 内容生成（通用 OpenAI 协议）
 
-**目标**：接入兼容 OpenAI API 协议的大模型（包括 OpenAI、Ollama、vLLM、Claude API 等），
+**目标**：接入任何兼容 OpenAI Chat Completions API 协议的大模型服务（不限于 OpenAI 自家模型），
 为 Phase 4 的路径树生成提供 AI 赋能的笔记内容，替代模板化占位符。
 
+**协议兼容性**：遵循 OpenAI Chat Completions API 协议的服务均可接入，包括但不限于：
+- OpenAI（GPT-4o、GPT-4o-mini 等）
+- DeepSeek（deepseek-chat）
+- Qwen 通义千问（qwen-turbo、qwen-plus）
+- Groq（llama、mixtral 等开源模型）
+- Together AI
+- Ollama（本地运行的开源模型，llama3、qwen2 等）
+- vLLM（自部署的开源模型）
+- Azure OpenAI
+- 任何兼容 OpenAI 协议的 API 代理
+
 **核心功能**：
-1. **LLMClient 模块**：封装 OpenAI API 协议，支持自定义 endpoint、API Key、model、temperature。
+1. **LLMClient 模块**：封装 OpenAI Chat Completions API，endpoint 完全可配，不绑定特定服务商。
 2. **AI 主题分解**：用 LLM 将用户输入的主题拆解为真实的知识点树（而非通用阶段模板）。
 3. **AI 内容填充**：每个知识点笔记由 LLM 生成真正的内容（概念解释、关键要点、示例代码等）。
-4. **回退机制**：LLM 不可用时（无 API Key / 网络不通），自动降级使用 Phase 4 模板生成。
-5. **设置项扩展**：`apiEndpoint`（默认 https://api.openai.com/v1）、`apiKey`、`model`（默认 gpt-4o-mini）、`temperature`（默认 0.7）、`useAI`（启用/关闭 AI 生成）。
+4. **回退机制**：LLM 不可用时（无 API Key / 服务不可达），自动降级使用 Phase 4 模板生成。
+5. **设置项扩展**：`apiEndpoint`（默认 https://api.openai.com/v1）、`apiKey`（本地服务可空）、`model`（默认 gpt-4o-mini）、`temperature`（默认 0.7）。
 
 **新增需求**：
 
@@ -323,10 +334,10 @@ Phase 4 扩展插件设置项：
 输出：LLM 生成的 JSON 或 Markdown 文本
 
 职责：
-- 封装 OpenAI Chat Completions API
+- 封装 OpenAI Chat Completions API，endpoint 完全可配置，不绑定特定服务商
 - 支持流式与非流式响应
 - 错误处理和自动重试
-- 兼容 OpenAI、Ollama、vLLM、Claude 等兼容协议的服务
+- 兼容一切实现了 OpenAI Chat Completions API 协议的服务
 
 数据模型：
 ```typescript

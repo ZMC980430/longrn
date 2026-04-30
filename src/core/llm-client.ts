@@ -2,13 +2,18 @@
  * LLMClient — Phase 5 核心模块
  *
  * 封装 OpenAI Chat Completions API 协议，支持自定义 endpoint。
- * 兼容 OpenAI、Ollama、vLLM、Claude API、任何 OpenAI 兼容代理。
+ * 兼容任何实现了 OpenAI 协议的大模型服务，不限于 OpenAI 自家模型。
  *
- * ## 支持的 API 示例
- * - OpenAI:      https://api.openai.com/v1
- * - Ollama:      http://localhost:11434/v1
- * - vLLM:        http://localhost:8000/v1
- * - Claude API:  https://api.anthropic.com/v1  (需 OpenAI 兼容代理)
+ * ## 支持的 API 示例（部分列举）
+ * - OpenAI:          https://api.openai.com/v1
+ * - DeepSeek:        https://api.deepseek.com/v1
+ * - Qwen（通义千问）: https://dashscope.aliyuncs.com/compatible-mode/v1
+ * - Groq:            https://api.groq.com/openai/v1
+ * - Together AI:     https://api.together.xyz/v1
+ * - Ollama（本地）:   http://localhost:11434/v1
+ * - vLLM（自部署）:   http://localhost:8000/v1
+ * - Claude（代理）:   需 OpenAI 兼容转发层
+ * - Azure OpenAI:    https://<你的资源>.openai.azure.com/v1
  *
  * @see docs/SDD.md §5.13
  */
@@ -17,11 +22,11 @@
 
 /** LLM 配置 — 来自插件设置 */
 export interface LLMConfig {
-  /** OpenAI 兼容 API 端点，如 https://api.openai.com/v1 */
+  /** OpenAI 兼容 API 端点，支持任意兼容 OpenAI 协议的服务 */
   apiEndpoint: string;
-  /** API Key */
+  /** API Key（Ollama 等本地服务可留空） */
   apiKey: string;
-  /** 模型名称，如 gpt-4o-mini, gpt-4o, deepseek-chat */
+  /** 模型名称，取决于服务商。如 gpt-4o-mini, deepseek-chat, qwen-turbo, llama3.1 (Ollama) */
   model: string;
   /** 生成温度 0-2，默认 0.7 */
   temperature: number;
