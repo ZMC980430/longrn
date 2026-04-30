@@ -5,6 +5,7 @@ import { NoteGenerator } from '../core/note-generator.js';
 import { LearningStateManager, StateFileOps } from '../core/learning-state-manager.js';
 import { FSRSScheduler } from '../core/fsrs-scheduler.js';
 import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
+import { LearningPathTreeGenerator, NoteStyle } from '../core/path-tree-generator.js';
 
 // ── Plugin Settings ──────────────────────────────────────────────
 
@@ -17,6 +18,13 @@ interface LongrnPluginSettings {
 	dueReviewLimit: number;
 	/** 学习路径笔记的输出目录（相对于 Vault 根目录） */
 	outputFolder: string;
+	// ── Phase 4 配置 ──
+	/** 路径树生成深度（1-3） */
+	maxGenerationDepth: number;
+	/** 每层节点数（3-10） */
+	nodesPerLayer: number;
+	/** 笔记生成风格 */
+	generationStyle: NoteStyle;
 }
 
 const DEFAULT_SETTINGS: LongrnPluginSettings = {
@@ -24,6 +32,9 @@ const DEFAULT_SETTINGS: LongrnPluginSettings = {
 	quickReviewCount: 5,
 	dueReviewLimit: 10,
 	outputFolder: 'learning-path',
+	maxGenerationDepth: 2,
+	nodesPerLayer: 5,
+	generationStyle: 'map',
 };
 
 // ── User Input Modal ─────────────────────────────────────────────
@@ -137,6 +148,7 @@ export default class LearningPathPlugin extends Plugin {
 	stateManager!: LearningStateManager;
 	fsrsScheduler!: FSRSScheduler;
 	semanticLinker!: SemanticAutoLinker;
+	pathTreeGenerator!: LearningPathTreeGenerator;
 
 	/**
 	 * Create a StateFileOps that uses Obsidian's vault adapter.
@@ -177,6 +189,7 @@ export default class LearningPathPlugin extends Plugin {
 		this.noteGenerator = new NoteGenerator();
 		this.fsrsScheduler = new FSRSScheduler();
 		this.semanticLinker = new SemanticAutoLinker();
+		this.pathTreeGenerator = new LearningPathTreeGenerator();
 
 		// Initialize state manager after vault is available
 		this.app.workspace.onLayoutReady(() => {
@@ -217,6 +230,13 @@ export default class LearningPathPlugin extends Plugin {
       id: 'generate-review-note',
       name: '生成复习笔记',
       callback: () => void this.generateReviewNote(),
+    });
+
+    // Phase 4
+    this.addCommand({
+      id: 'generate-learning-path-tree',
+      name: '生成学习路径（不依赖笔记·主题输入）',
+      callback: () => void this.generateLearningPathTree(),
     });
 
     // 注册设置页面（插件介绍与使用说明）
@@ -521,6 +541,63 @@ export default class LearningPathPlugin extends Plugin {
 		}
 	}
 
+	// ===== Phase 4: Learning Path Tree =====
+
+	async generateLearningPathTree() {
+		const modal = new TargetInputModal(
+			this.app,
+			'生成学习路径（不依赖笔记）',
+			'输入你想学的内容，例如: TypeScript, 机器学习, Python数据分析',
+			'',
+		);
+		const topic = await modal.openAndAwait();
+		if (!topic) {
+			new Notice('已取消');
+			return;
+		}
+
+		new Notice(`正在为「${topic}」生成学习路径树...`);
+
+		try {
+			const tree = this.pathTreeGenerator.generatePathTree(
+				topic,
+				this.settings.maxGenerationDepth,
+				this.settings.nodesPerLayer,
+			);
+
+			new Notice(`路径树生成完毕（${tree.nodes.length} 个阶段），正在渲染笔记...`);
+
+			// 渲染为 Markdown 笔记
+			let notes = this.pathTreeGenerator.renderTreeToMarkdown(tree, this.settings.generationStyle);
+
+			// 交叉链接
+			notes = this.pathTreeGenerator.crossLinkGeneratedNotes(notes);
+
+			// 去重检查 + 写入 vault
+			const existingFiles = this.app.vault.getMarkdownFiles().map(f => f.path);
+			let createdCount = 0;
+
+			for (const [fileName, content] of notes) {
+				const dedupedName = this.pathTreeGenerator.deduplicateFileName(fileName, existingFiles);
+
+				// 确保输出目录存在
+				const folderExists = await this.app.vault.adapter.exists(this.settings.outputFolder);
+				if (!folderExists) {
+					await this.app.vault.createFolder(this.settings.outputFolder);
+				}
+
+				const filePath = `${this.settings.outputFolder}/${dedupedName}`;
+				await this.app.vault.create(filePath, content);
+				createdCount++;
+			}
+
+			new Notice(`🎉 已生成 ${createdCount} 篇 ${topic} 学习路径笔记！`);
+		} catch (error: any) {
+			console.error('Longrn [generateLearningPathTree]:', error);
+			new Notice(`生成失败: ${error.message}`);
+		}
+	}
+
 	onunload() {
 		console.log('Unloading Longrn Learning Path Plugin');
 	}
@@ -604,6 +681,52 @@ class LongrnSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// ===== Phase 4: 路径树生成配置 =====
+		containerEl.createEl('h2', { text: '🌳 学习路径树生成（Phase 4）' });
+
+		new Setting(containerEl)
+			.setName('生成递归深度')
+			.setDesc('路径树的递归层数。1 = 仅生成主路径概览，2 = 生成主路径+子笔记，3 = 再展开一层。')
+			.addSlider((slider) => {
+				slider
+					.setLimits(1, 3, 1)
+					.setValue(this.plugin.settings.maxGenerationDepth)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.plugin.settings.maxGenerationDepth = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('每层节点数量')
+			.setDesc('每个阶段的子知识点数量（3-10）。数量越多笔记越详细。')
+			.addSlider((slider) => {
+				slider
+					.setLimits(3, 10, 1)
+					.setValue(this.plugin.settings.nodesPerLayer)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.plugin.settings.nodesPerLayer = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('笔记生成风格')
+			.setDesc('选择生成笔记的模板风格。')
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption('map', '知识导图')
+					.addOption('tutorial', '教程风格')
+					.addOption('cheatsheet', '速查表')
+					.setValue(this.plugin.settings.generationStyle)
+					.onChange(async (value) => {
+						this.plugin.settings.generationStyle = value as 'map' | 'tutorial' | 'cheatsheet';
+						await this.plugin.saveSettings();
+					});
+			});
+
 		// ── 插件简介 ──
 		containerEl.createEl('h2', { text: '📖 关于本插件' });
 		containerEl.createEl('p', {
@@ -636,6 +759,10 @@ class LongrnSettingTab extends PluginSettingTab {
 			{
 				name: '生成复习笔记',
 				desc: '自动生成含回顾内容和评分模板的复习笔记，支持快速复习模式。',
+			},
+			{
+				name: '生成学习路径（不依赖笔记·主题输入）',
+				desc: 'Phase 4: 输入主题直接生成完整学习路径笔记树，无需 Vault 中已有笔记。',
 			},
 		];
 

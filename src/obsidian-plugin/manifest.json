@@ -1,7 +1,7 @@
 {
 	"id": "longrn-learning-path",
 	"name": "Longrn 学习路径系统",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"minAppVersion": "1.5.0",
 	"description": "终生学习者智能学习路径系统，基于知识图谱自动生成个性化学习路径与复习计划",
 	"author": "Longrn Team",
