@@ -5,8 +5,19 @@
  * L2-normalized sentence embeddings using a lightweight model
  * (Xenova/all-MiniLM-L6-v2, 384 dimensions).
  *
- * The model is loaded lazily on first use to avoid startup cost for
- * consumers that don't need embeddings (e.g. non-semantic path planning).
+ * ## Electron / Obsidian compatibility
+ *
+ * @xenova/transformers detects `process.release.name === "node"` and
+ * tries to load the native `onnxruntime-node` addon — which cannot be
+ * bundled. We work around this by:
+ *
+ * 1. Temporarily setting `process.release.name = "browser"` before import
+ *    so the library picks the Web (WASM) ONNX backend.
+ * 2. The esbuild plugin in `scripts/build-obsidian.mjs` stubs the
+ *    `onnxruntime-node` require to prevent a runtime crash from the
+ *    unconditional `require("onnxruntime-node")` inside onnx.js.
+ * 3. The ONNX WASM files load from the jsDelivr CDN at:
+ *    `https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/`
  */
 
 // Module-level lazy pipeline factory — shared across all EmbeddingEngine instances.
@@ -21,16 +32,67 @@ export class EmbeddingEngine {
 
   /**
    * Loads the model on first call. Subsequent calls are no-ops.
-   * Downloads the model (~80MB) on first use via Transformers.js.
+   *
+   * In Obsidian's Electron renderer, we override process.release.name
+   * to "browser" so @xenova/transformers uses onnxruntime-web (WASM)
+   * instead of onnxruntime-node (native addon). The esbuild build script
+   * stubs the onnxruntime-node require to prevent a crash from the
+   * unconditional require inside the library's onnx.js backend init.
+   *
+   * The model (~80 MB) downloads from HuggingFace Hub on first use.
+   * ONNX WASM runtime files load from jsDelivr CDN.
+   *
+   * @throws If @xenova/transformers cannot be loaded or model fails to initialize.
    */
   async loadModel(): Promise<void> {
     if (this.model) return;
     if (!pipelineFn) {
-      const mod = await import('@xenova/transformers');
-      pipelineFn = mod.pipeline;
+      // ---- Phase 1: Import @xenova/transformers ----
+      // Force the browser (WASM) ONNX backend by faking the runtime env.
+      const release: any = (typeof process !== 'undefined' && process.release)
+        ? process.release : null;
+      const savedReleaseName: string | undefined = release?.name;
+      if (release) release.name = 'browser';
+
+      try {
+        // Dynamic import is resolved to an in-bundle module by esbuild.
+        const mod = await import('@xenova/transformers');
+        pipelineFn = mod.pipeline;
+
+        // ---- Phase 2: Configure ONNX WASM paths ----
+        // The bundled env.js sets wasmPaths to a CDN URL when it detects
+        // we are NOT running locally (because fs/path stubs are empty).
+        // We explicitly set the CDN path as a fallback to be safe.
+        try {
+          const ortEnv = (mod as any).env;
+          if (ortEnv?.backends?.onnx?.wasm?.wasmPaths === undefined ||
+              ortEnv?.backends?.onnx?.wasm?.wasmPaths === './') {
+            // CDN fallback — the official Transformers.js CDN endpoint.
+            ortEnv.backends.onnx.wasm.wasmPaths =
+              'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/';
+          }
+        } catch (_) {
+          // env not accessible — library will use its own default.
+        }
+      } finally {
+        // Restore original value to avoid side effects on other code.
+        if (release && savedReleaseName !== undefined) {
+          release.name = savedReleaseName;
+        }
+      }
     }
-    this.model = await pipelineFn('feature-extraction', this.modelName);
-    console.log(`EmbeddingEngine: model "${this.modelName}" loaded`);
+
+    // ---- Phase 3: Load the model ----
+    try {
+      this.model = await pipelineFn('feature-extraction', this.modelName);
+      console.log(`EmbeddingEngine: model "${this.modelName}" loaded`);
+    } catch (err: any) {
+      throw new Error(
+        `无法加载语义模型 "${this.modelName}"。\n` +
+        `首次使用需联网下载模型（约 80MB），请检查网络连接。\n` +
+        `原始错误: ${err.message}`,
+      );
+    }
   }
 
   /**

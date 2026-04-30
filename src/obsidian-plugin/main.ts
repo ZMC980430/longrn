@@ -264,6 +264,7 @@ export default class LearningPathPlugin extends Plugin {
 
 			new Notice(`「${target}」学习路径笔记生成完成！（${selectedPath.steps.length} 篇笔记）`);
 		} catch (error: any) {
+			console.error('Longrn [generateLearningPath]:', error);
 			new Notice(`生成失败: ${error.message}`);
 		}
 	}
@@ -314,6 +315,7 @@ export default class LearningPathPlugin extends Plugin {
 				.join(', ');
 			new Notice(`语义路径生成完成！\n${stepsPreview}`);
 		} catch (error: any) {
+			console.error('Longrn [generateSemanticPath]:', error);
 			new Notice(`语义路径生成失败: ${error.message}`);
 		}
 	}
@@ -366,6 +368,7 @@ export default class LearningPathPlugin extends Plugin {
 				.join(' | ');
 			new Notice(`状态感知路径生成完成！\n${stepInfo}`);
 		} catch (error: any) {
+			console.error('Longrn [generateStateAwarePath]:', error);
 			new Notice(`状态感知路径生成失败: ${error.message}`);
 		}
 	}
@@ -393,6 +396,7 @@ export default class LearningPathPlugin extends Plugin {
 				`今日待复习: ${dueIds.length} 项`,
 			);
 		} catch (error: any) {
+			console.error('Longrn [showReviewList]:', error);
 			new Notice(`获取复习列表失败: ${error.message}`);
 		}
 	}
@@ -441,6 +445,7 @@ export default class LearningPathPlugin extends Plugin {
 			await this.app.vault.create(filePath, reviewLines.join('\n---\n'));
 			new Notice(`复习笔记已创建（${reviewIds.length} 项）: ${filePath}`);
 		} catch (error: any) {
+			console.error('Longrn [generateReviewNote]:', error);
 			new Notice(`生成复习笔记失败: ${error.message}`);
 		}
 	}

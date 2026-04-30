@@ -33,16 +33,54 @@ async function build() {
     outfile: resolve(outDir, 'main.js'),
     external: [
       'obsidian',
-      '@xenova/transformers',
-      'onnxruntime-node',
-      'onnxruntime-web',
     ],
+    // ---- Plugins ----
+    plugins: [
+      {
+        name: 'stub-transformers-node-deps',
+        setup(build) {
+          // @xenova/transformers unconditionally requires onnxruntime-node
+          // (in onnx.js) plus fs/path/url/worker_threads (in env.js etc).
+          // In Obsidian's Electron renderer, native addons and some Node
+          // builtins are unavailable. We force the browser/WASM path via
+          // process.release.name, but the require() calls still execute.
+          // Replace them with harmless stubs.
+          const stubList = [
+            'fs',
+            'path',
+            'url',
+            'onnxruntime-node',
+            'worker_threads',
+            'sharp',
+          ];
+          const stubFilter = new RegExp(
+            '^(' + stubList.join('|') + ')$',
+          );
+          build.onResolve({ filter: stubFilter }, (args) => {
+            // Only stub inside @xenova/transformers.
+            // Our own core modules genuinely need fs, path, crypto etc.
+            if (args.importer.includes('@xenova')) {
+              return { path: args.path, namespace: 'stub' };
+            }
+            return undefined; // let esbuild handle normally
+          });
+          build.onLoad(
+            { filter: /.*/, namespace: 'stub' },
+            () => ({ contents: 'module.exports = {};', loader: 'js' }),
+          );
+        },
+      },
+    ],
+    // ---- /Plugins ----
     format: 'cjs',
     target: 'ES2020',
     logLevel: 'info',
     sourcemap: false,
     treeShaking: true,
     platform: 'node',
+    // Use 'browser' condition so @xenova/transformers resolves its
+    // browser entry (onnxruntime-web) over the Node.js one (onnxruntime-node).
+    conditions: ['browser'],
     loader: {
       '.ts': 'ts',
     },
