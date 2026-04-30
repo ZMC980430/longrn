@@ -70,16 +70,26 @@ export class LearningStateManager {
    */
   constructor(vaultPath: string, fileOps?: StateFileOps) {
     this.fileOps = fileOps ?? defaultFileOps;
-    const storeDir = path.join(vaultPath, '.longrn');
-    // Use sync check for dir; the rest is async-capable
-    if (!fs.existsSync(storeDir)) {
-      fs.mkdirSync(storeDir, { recursive: true });
-    }
-    this.statePath = path.join(storeDir, 'state.json');
+    this.statePath = path.join(vaultPath, '.longrn', 'state.json');
     this.index = { updatedAt: '', entries: {} };
     this.scheduler = new FSRSScheduler();
+    // Ensure state directory exists using fileOps
+    this.ensureStateDir(vaultPath).catch(() => {});
     // Try loading existing state (silent fail if not found)
     this.loadState().catch(() => {});
+  }
+
+  /** Ensure the .longrn directory exists. */
+  private async ensureStateDir(vaultPath: string): Promise<void> {
+    const storeDir = path.join(vaultPath, '.longrn');
+    try {
+      const exists = await this.fileOps.exists(storeDir);
+      if (!exists) {
+        await this.fileOps.mkdir(storeDir);
+      }
+    } catch {
+      // Fallback: already exists or can't create — non-fatal
+    }
   }
 
   /** Loads persisted states from disk. Returns false if no state file exists. */

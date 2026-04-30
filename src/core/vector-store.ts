@@ -58,11 +58,7 @@ export class VectorStore {
     fileOps?: StateFileOps,
   ) {
     this.fileOps = fileOps ?? defaultFileOps;
-    const storeDir = path.join(vaultPath, '.longrn');
-    if (!fs.existsSync(storeDir)) {
-      fs.mkdirSync(storeDir, { recursive: true });
-    }
-    this.indexPath = path.join(storeDir, 'embeddings.json');
+    this.indexPath = path.join(vaultPath, '.longrn', 'embeddings.json');
     this.index = { modelName, dimensions, updatedAt: '', entries: {} };
   }
 
