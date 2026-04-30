@@ -2,7 +2,7 @@
 
 ## 1. 项目概述
 
-本项目为“终生学习者智能学习路径系统”，目标是连接用户的 Obsidian/Logseq 本地知识库，通过知识图谱与路径规划算法生成个性化学习路径，并自动创建结构化笔记和双链。
+本项目为"终生学习者智能学习路径系统"，目标是连接用户的 Obsidian/Logseq 本地知识库，通过知识图谱与路径规划算法生成个性化学习路径，并自动创建结构化笔记和双链。
 
 ## 2. 目标与范围
 
@@ -16,6 +16,8 @@
 - **Phase 1（已完成）**：笔记扫描、知识库构建、路径规划、自动链接和双工具插件原型。
 - **Phase 2（已完成）**：语义向量嵌入、向量存储持久化、语义路径规划、向后兼容。
 - **Phase 3（已完成）**：学习状态管理、FSRS 间隔重复调度、语义模糊自动链接、路径规划状态感知增强。
+- **Phase 3.1（已完成）**：去除硬编码、增加 Modal 交互输入、插件设置系统、修复 `fs`→vault API 文件操作。
+- **Phase 4（规划中）**：用户输入驱动的内容生成——不依赖已有笔记，从零生成学习路径。
 - 后续阶段不包含完整 AI 写作引擎、离线大模型集成等高级功能（预留接口）。
 
 ## 3. 需求说明
@@ -29,11 +31,27 @@
 4. 生成笔记：创建新笔记内容，并自动插入内部链接（精确匹配）。
 5. 双工具适配：分别支持 Obsidian 插件与 Logseq 插件。
 
-#### Phase 3（已实现）
+#### Phase 3 & 3.1（已实现）
 6. **FR-6 学习状态管理**：持久化追踪每个知识节点的学习状态（unknown / planned / in_progress / mastered / archived），记录复习时间戳与次数。
 7. **FR-7 FSRS 间隔重复调度**：实现 FSRS-5 算法，根据用户复习评分动态计算下次复习时间，每日生成待复习列表。
 8. **FR-8 语义模糊自动链接**：在精确匹配基础上，利用语义嵌入对未匹配文本段进行模糊匹配，相似度超过阈值（0.75）时自动建议链接。
 9. **FR-9 路径规划状态感知**：路径规划时自动排除已掌握节点，优先从计划中/进行中的节点出发，为路径步骤附加学习状态标记。
+
+#### Phase 4（规划中）
+
+10. **FR-10 用户输入驱动的学习路径生成**：
+    - 用户输入学习主题（如"学TypeScript"、"机器学习入门"），插件不依赖已有 vault 笔记，直接生成一份完整的学习路径笔记。
+    - **主路径笔记**：一次性生成包含主题概述、分阶段学习步骤、核心概念清单、推荐资源（书籍/课程）的结构化 Markdown 笔记。
+    - **递归细化**：主路径笔记中的每个子知识点自动成为可点击的入口，支持逐层展开生成更细粒度的子笔记。
+    - **多层深度**：支持设置递归深度（默认 2 层），例如输入"TypeScript" → 主路径笔记 → 子笔记（基础类型/接口/泛型等）→ 孙笔记（每个子属性的详细说明）。
+    - **不与现有笔记冲突**：若 vault 中已有同名笔记，自动跳过或合并，不覆盖已有内容。
+    - **路径笔记不添加学习状态**：路径笔记为纯参考内容，不进入 learning state 管理流程。
+11. **FR-11 可配置的生成粒度**：
+    - 提供滑块/输入框控制生成深度（1-3 层）和每层笔记数量（3-10 个）。
+    - 支持选择生成风格：知识导图风格 / 教程风格 / 速查表风格。
+12. **FR-12 跨笔记自动链接**：
+    - 生成的所有笔记之间自动建立双向 `[[wikilink]]` 链接。
+    - 子笔记中自动引用父笔记和相关兄弟笔记。
 
 ### 3.2 非功能需求
 - 扩展性：模块化设计，方便后续添加算法与插件适配。
@@ -158,6 +176,48 @@
 - 默认排除 `mastered` 节点，从 `planned`/`in_progress` 节点出发
 - Path 接口扩展：新增 `states?: LearningState['status'][]` 字段
 
+### 5.11 智能路径内容生成器（Phase 4 新增）
+
+输入：用户输入的主题文本（如"学TypeScript"）、配置参数（深度、数量、风格）
+输出：主路径笔记 + 多层子笔记的 Markdown 文件集合
+
+职责：
+- **主题分解引擎**：将用户输入的主题拆解为递进的子知识点列表，支持多层递归。
+- **笔记模板系统**：提供多套 Markdown 模板（知识导图 / 教程 / 速查表），根据配置选择。
+- **交叉链接引擎**：生成的所有笔记之间自动建立双向 `[[wikilink]]` 引用。
+- **去重保护**：检查 vault 中是否已有同名笔记，存在则跳过或追加"副本"后缀。
+
+数据模型：
+```typescript
+interface LearningPathTree {
+  topic: string;             // 用户输入的主题
+  depth: number;             // 当前递归深度
+  maxDepth: number;          // 最大递归深度
+  nodes: PathTreeNode[];     // 该层的知识点节点
+}
+
+interface PathTreeNode {
+  title: string;             // 知识点标题
+  summary: string;           // 一句话摘要
+  content: string;           // Markdown 正文内容（模板渲染后）
+  children: PathTreeNode[];  // 子知识点（下一层）
+  parent?: PathTreeNode;     // 父节点引用
+  siblings?: string[];       // 同级兄弟节点标题列表（用于交叉链接）
+}
+```
+
+关键函数：
+- `generatePathTree(topic: string, maxDepth: number, nodeCount: number): LearningPathTree`
+- `renderTreeToMarkdown(tree: LearningPathTree, style: 'map' | 'tutorial' | 'cheatsheet'): Map<string, string>`
+- `crossLinkGeneratedNotes(notes: Map<string, string>): Map<string, string>`
+
+### 5.12 配置系统增强（Phase 4）
+
+Phase 4 扩展插件设置项：
+- `maxGenerationDepth`: 生成递归深度（1-3，默认 2）
+- `nodesPerLayer`: 每层知识节点数量（3-10，默认 5）
+- `generationStyle`: 笔记风格（map/tutorial/cheatsheet，默认 map）
+
 ## 6. 开发计划
 
 ### 6.1 Phase 1（已完成）—— 核心引擎与插件原型
@@ -200,16 +260,47 @@
 5. **更新 `note-generator.ts`**：`generateNotes` 方法新增可选参数 `outputSubfolder`，支持自定义输出目录。文件名正则支持中文字符。
 6. **优化状态管理初始化**：新增 `ensureStateManager()` 延迟初始化方法，确保 `onLayoutReady` 回调未触发时也能正常使用。
 
+### 6.5 Phase 4（规划中）—— 用户输入驱动的学习路径生成
+
+**目标**：用户无需在 vault 中预先创建任何笔记，输入主题即可从零生成完整的学习路径笔记树。
+
+**核心功能**：
+1. **实现 `LearningPathTreeGenerator` 模块**：将用户输入的主题递归分解为知识点树。
+2. **实现多模板渲染引擎**：支持知识导图 / 教程 / 速查表三种风格。
+3. **新增 `generate-learning-path-tree` 命令**：弹出配置对话框（主题 + 深度 + 风格），生成路径树。
+4. **路径笔记自动交叉链接**：同级、父子节点之间自动建立双向 `[[wikilink]]`。
+5. **配置扩展**：新增 `maxGenerationDepth`、`nodesPerLayer`、`generationStyle` 设置项。
+6. **去重保护**：检测 vault 中已存在的同名笔记，自动跳过或添加副本标记。
+
 **验证**：
-- `npm run build` 编译通过
-- `npm run build:obsidian` esbuild 打包成功（54KB）
-- `node scripts/phase3-test.mjs` 全部 6 组测试通过
+- 输入"学TypeScript"，生成包含 3-5 个核心章节的主路径笔记
+- 每个章节自动生成子笔记（默认 2 层深度）
+- 笔记间 `[[wikilink]]` 交叉引用正确
+- 重复生成不覆盖已有笔记
 
-### 6.5 后续迭代
+### 6.6 Phase 5（规划中）—— 本地大模型集成
 
-1. Phase 4：本地大模型集成（Llama.cpp 等离线推理引擎）。
-2. Phase 5：Canvas 集成、多领域知识图谱、CLI 工具。
-3. Phase 6：协作学习、学习进度可视化仪表盘。
+（原 Phase 4，顺延至 Phase 5）
+
+1. 本地大模型集成（Llama.cpp 等离线推理引擎）。
+2. AI 辅助生成笔记内容。
+3. 智能问答接口。
+
+### 6.7 Phase 6（规划中）—— 高级可视化
+
+（原 Phase 5，顺延至 Phase 6）
+
+1. Obsidian Canvas 集成。
+2. 多领域知识图谱可视化。
+3. CLI 工具。
+
+### 6.8 Phase 7（规划中）—— 协作与社交
+
+（原 Phase 6，顺延至 Phase 7）
+
+1. 协作学习功能。
+2. 学习进度可视化仪表盘。
+3. 社区资源共享。
 
 ## 7. 文档与交付
 
