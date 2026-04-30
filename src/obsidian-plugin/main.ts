@@ -2,7 +2,7 @@ import { Plugin, Notice, PluginSettingTab, Setting, Modal, App } from 'obsidian'
 import { KnowledgeBaseBuilder, Note } from '../core/knowledge-builder.js';
 import { PathPlanner } from '../core/path-planner.js';
 import { NoteGenerator } from '../core/note-generator.js';
-import { LearningStateManager } from '../core/learning-state-manager.js';
+import { LearningStateManager, StateFileOps } from '../core/learning-state-manager.js';
 import { FSRSScheduler } from '../core/fsrs-scheduler.js';
 import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
 
@@ -138,6 +138,35 @@ export default class LearningPathPlugin extends Plugin {
 	fsrsScheduler!: FSRSScheduler;
 	semanticLinker!: SemanticAutoLinker;
 
+	/**
+	 * Create a StateFileOps that uses Obsidian's vault adapter.
+	 * This ensures state.json is read/written through Obsidian's vault,
+	 * which works correctly with iCloud and triggers proper vault refresh.
+	 */
+	private get vaultStateFileOps(): StateFileOps {
+		const vaultPath = this.vaultBasePath;
+		return {
+			exists: async (fp: string) => {
+				const relPath = fp.startsWith(vaultPath) ? fp.slice(vaultPath.length + 1) : fp;
+				return this.app.vault.adapter.exists(relPath);
+			},
+			mkdir: async (fp: string) => {
+				const relPath = fp.startsWith(vaultPath) ? fp.slice(vaultPath.length + 1) : fp;
+				if (!(await this.app.vault.adapter.exists(relPath))) {
+					await this.app.vault.createFolder(relPath);
+				}
+			},
+			readFile: async (fp: string) => {
+				const relPath = fp.startsWith(vaultPath) ? fp.slice(vaultPath.length + 1) : fp;
+				return this.app.vault.adapter.read(relPath);
+			},
+			writeFile: async (fp: string, data: string) => {
+				const relPath = fp.startsWith(vaultPath) ? fp.slice(vaultPath.length + 1) : fp;
+				await this.app.vault.adapter.write(relPath, data);
+			},
+		};
+	}
+
 	async onload() {
 		console.log('Loading Learning Path Plugin (Phase 3.1)');
 
@@ -152,7 +181,8 @@ export default class LearningPathPlugin extends Plugin {
 		// Initialize state manager after vault is available
 		this.app.workspace.onLayoutReady(() => {
 			const vaultPath = this.vaultBasePath;
-			this.stateManager = new LearningStateManager(vaultPath);
+			const fileOps = this.vaultStateFileOps;
+			this.stateManager = new LearningStateManager(vaultPath, fileOps);
 			console.log('Longrn: state manager initialized');
 		});
 
@@ -226,13 +256,40 @@ export default class LearningPathPlugin extends Plugin {
 	/** Ensures stateManager is initialized (lazy-init if layout hasn't fired yet). */
 	private ensureStateManager(): LearningStateManager {
 		if (!this.stateManager) {
-			this.stateManager = new LearningStateManager(this.vaultBasePath);
+			const fileOps = this.vaultStateFileOps;
+			this.stateManager = new LearningStateManager(this.vaultBasePath, fileOps);
 		}
 		return this.stateManager;
 	}
 
+	/**
+	 * Generate notes using Obsidian vault API instead of Node.js `fs`.
+	 * This ensures files are properly tracked by Obsidian and work with iCloud.
+	 */
+	private async generateNotesWithVault(pathSteps: Note[]): Promise<void> {
+		const outputFolder = this.settings.outputFolder;
+
+		// Ensure output folder exists via vault API
+		const folderExists = await this.app.vault.adapter.exists(outputFolder);
+		if (!folderExists) {
+			await this.app.vault.createFolder(outputFolder);
+		}
+
+		for (let i = 0; i < pathSteps.length; i++) {
+			const step = pathSteps[i];
+			let content = this.noteGenerator.generateNote(step);
+			content = this.noteGenerator.autoLink(content, new Map(pathSteps.map(n => [n.title, n])));
+
+			const safeName = step.title.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '-');
+			const fileName = `${outputFolder}/${i + 1}-${safeName}.md`;
+
+			await this.app.vault.create(fileName, content);
+		}
+	}
+
+	// ===== Phase 1: Learning Path =====
+
 	async generateLearningPath() {
-		// Phase 3.1: Use modal to collect target topic
 		const modal = new TargetInputModal(
 			this.app,
 			'生成学习路径',
@@ -251,16 +308,25 @@ export default class LearningPathPlugin extends Plugin {
 			const notes = Array.from((await this.buildKnowledgeBase()).values());
 			const graph = this.kbBuilder.buildGraph(notes);
 
-			const paths = this.pathPlanner.planPath(target, graph);
+			let paths = this.pathPlanner.planPath(target, graph);
 
-			if (paths.length === 0) {
-				new Notice(`未找到通往「${target}」的学习路径，请检查知识库中是否有相关笔记。`);
+			// Fallback: fuzzy matching if exact title not found
+			if (paths.length === 0 || paths[0].steps.length === 0) {
+				const fuzzyTarget = Array.from(graph.nodes.values())
+					.find(n => n.title.toLowerCase().includes(target.toLowerCase())
+						|| target.toLowerCase().includes(n.title.toLowerCase()));
+				if (fuzzyTarget) {
+					paths = this.pathPlanner.planPath(fuzzyTarget.title, graph);
+				}
+			}
+
+			if (paths.length === 0 || paths[0].steps.length === 0) {
+				new Notice(`未找到通往「${target}」的学习路径。请检查知识库标题，或尝试更精确的关键词。`);
 				return;
 			}
 
 			const selectedPath = paths[0];
-			const vaultPath = this.vaultBasePath;
-			await this.noteGenerator.generateNotes(selectedPath.steps, vaultPath, undefined, this.settings.outputFolder);
+			await this.generateNotesWithVault(selectedPath.steps);
 
 			new Notice(`「${target}」学习路径笔记生成完成！（${selectedPath.steps.length} 篇笔记）`);
 		} catch (error: any) {
@@ -272,7 +338,6 @@ export default class LearningPathPlugin extends Plugin {
 	// ===== Phase 2: Semantic Path =====
 
 	async generateSemanticPath() {
-		// Phase 3.1: Use modal to collect query
 		const modal = new TargetInputModal(
 			this.app,
 			'语义生成学习路径',
@@ -290,10 +355,9 @@ export default class LearningPathPlugin extends Plugin {
 		try {
 			const notes = Array.from((await this.buildKnowledgeBase()).values());
 
-			// Generate embeddings with progress
 			new Notice('正在生成语义索引（首次较慢，约需下载模型）...');
 			const vaultPath = this.vaultBasePath;
-			await this.kbBuilder.embedAll(notes, vaultPath);
+			await this.kbBuilder.embedAll(notes, vaultPath, this.vaultStateFileOps);
 			new Notice(`语义索引完成！共 ${notes.length} 条笔记`);
 
 			const graph = this.kbBuilder.buildGraph(notes);
@@ -308,7 +372,7 @@ export default class LearningPathPlugin extends Plugin {
 				engine,
 			);
 
-			await this.noteGenerator.generateNotes(semanticPath.steps, vaultPath, undefined, this.settings.outputFolder);
+			await this.generateNotesWithVault(semanticPath.steps);
 
 			const stepsPreview = semanticPath.steps
 				.map((s, i) => `${i + 1}. ${s.title} (${(semanticPath.scores?.[i] ?? 0).toFixed(3)})`)
@@ -323,7 +387,6 @@ export default class LearningPathPlugin extends Plugin {
 	// ===== Phase 3: State-Aware Path =====
 
 	async generateStateAwarePath() {
-		// Phase 3.1: Use modal to collect target
 		const modal = new TargetInputModal(
 			this.app,
 			'状态感知学习路径',
@@ -343,24 +406,32 @@ export default class LearningPathPlugin extends Plugin {
 			const notes = Array.from((await this.buildKnowledgeBase()).values());
 			const graph = this.kbBuilder.buildGraph(notes);
 
-			// Count mastered nodes
 			const masteredSize = stateManager.getMasteredIds().size;
 			new Notice(`已掌握 ${masteredSize} 个节点，将在路径中跳过`);
 
-			const paths = this.pathPlanner.planPathWithState(target, graph, stateManager);
+			let paths = this.pathPlanner.planPathWithState(target, graph, stateManager);
 
-			if (paths.length === 0) {
-				new Notice('未找到学习路径。所有相关节点可能都已掌握！');
+			// Fallback: fuzzy matching
+			if (paths.length === 0 || paths[0].steps.length === 0) {
+				const fuzzyTarget = Array.from(graph.nodes.values())
+					.find(n => n.title.toLowerCase().includes(target.toLowerCase())
+						|| target.toLowerCase().includes(n.title.toLowerCase()));
+				if (fuzzyTarget) {
+					paths = this.pathPlanner.planPathWithState(fuzzyTarget.title, graph, stateManager);
+				}
+			}
+
+			if (paths.length === 0 || paths[0].steps.length === 0) {
+				new Notice('未找到学习路径。所有相关节点可能都已掌握，或目标标题不匹配。');
 				return;
 			}
 
 			const selectedPath = paths[0];
-			const vaultPath = this.vaultBasePath;
-			await this.noteGenerator.generateNotes(selectedPath.steps, vaultPath, undefined, this.settings.outputFolder);
+			await this.generateNotesWithVault(selectedPath.steps);
 
 			// Auto-mark generated notes as "planned"
 			for (const step of selectedPath.steps) {
-				stateManager.setStatus(step.id, 'planned');
+				await stateManager.setStatus(step.id, 'planned');
 			}
 
 			const stepInfo = selectedPath.steps
@@ -436,7 +507,7 @@ export default class LearningPathPlugin extends Plugin {
 			const fileName = `review-${new Date().toISOString().slice(0, 10)}.md`;
 			const filePath = `${this.settings.outputFolder}/${fileName}`;
 
-			// Ensure output folder exists
+			// Ensure output folder exists via vault API
 			const folderExists = await this.app.vault.adapter.exists(this.settings.outputFolder);
 			if (!folderExists) {
 				await this.app.vault.createFolder(this.settings.outputFolder);

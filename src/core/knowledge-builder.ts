@@ -3,6 +3,7 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { EmbeddingEngine } from './embedding-engine.js';
 import { VectorStore, ScoredNote } from './vector-store.js';
+import type { StateFileOps } from './learning-state-manager.js';
 
 /**
  * Represents a single note/article from the user's knowledge base.
@@ -120,7 +121,7 @@ export class KnowledgeBaseBuilder {
    * - Uses VectorStore for caching: skips notes whose content hash hasn't changed.
    * - Only embeds notes that are new or have changed content.
    */
-  async embedAll(notes: Note[], vaultPath: string): Promise<void> {
+  async embedAll(notes: Note[], vaultPath: string, fileOps?: StateFileOps): Promise<void> {
     this.embeddingEngine = new EmbeddingEngine();
     await this.embeddingEngine.loadModel();
 
@@ -128,8 +129,9 @@ export class KnowledgeBaseBuilder {
       vaultPath,
       this.embeddingEngine.getModelName(),
       this.embeddingEngine.getDimensions(),
+      fileOps,
     );
-    this.vectorStore.load();
+    await this.vectorStore.load();
 
     const toEmbed: Note[] = [];
     const texts: string[] = [];
@@ -155,7 +157,7 @@ export class KnowledgeBaseBuilder {
         note.embeddings = emb;
         this.vectorStore!.upsert(note.id, emb, VectorStore.hashContent(note.content));
       });
-      this.vectorStore.save();
+      await this.vectorStore.save();
     }
 
     // Restore remaining from cache that weren't in toEmbed

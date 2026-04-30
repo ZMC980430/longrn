@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { Note } from './knowledge-builder.js';
+import type { StateFileOps } from './learning-state-manager.js';
 
 /** A note paired with its similarity score (for search results). */
 export interface ScoredNote {
@@ -31,20 +32,32 @@ export interface VectorIndex {
   }>;
 }
 
+/** Default file ops using Node.js `fs` (sync). */
+const defaultFileOps: StateFileOps = {
+  exists: (p) => fs.existsSync(p),
+  mkdir: (p) => { fs.mkdirSync(p, { recursive: true }); },
+  readFile: (p) => fs.readFileSync(p, 'utf-8'),
+  writeFile: (p, d) => { fs.writeFileSync(p, d); },
+};
+
 export class VectorStore {
   private indexPath: string;
   public index: VectorIndex;
+  private fileOps: StateFileOps;
 
   /**
    * @param vaultPath - Base path of the vault (store sits at vaultPath/.longrn/)
    * @param modelName - Name of the embedding model used
    * @param dimensions - Vector dimensionality (e.g. 384 for all-MiniLM-L6-v2)
+   * @param fileOps - Optional file ops adapter (default: Node.js `fs`)
    */
   constructor(
     vaultPath: string,
     modelName: string,
     dimensions: number,
+    fileOps?: StateFileOps,
   ) {
+    this.fileOps = fileOps ?? defaultFileOps;
     const storeDir = path.join(vaultPath, '.longrn');
     if (!fs.existsSync(storeDir)) {
       fs.mkdirSync(storeDir, { recursive: true });
@@ -54,10 +67,11 @@ export class VectorStore {
   }
 
   /** Loads the vector index from disk. Returns false if no cached index exists. */
-  load(): boolean {
+  async load(): Promise<boolean> {
     try {
-      if (!fs.existsSync(this.indexPath)) return false;
-      const raw = fs.readFileSync(this.indexPath, 'utf-8');
+      const exists = await this.fileOps.exists(this.indexPath);
+      if (!exists) return false;
+      const raw = await this.fileOps.readFile(this.indexPath);
       this.index = JSON.parse(raw);
       return true;
     } catch {
@@ -66,9 +80,9 @@ export class VectorStore {
   }
 
   /** Persists the vector index to disk as JSON. */
-  save(): void {
+  async save(): Promise<void> {
     this.index.updatedAt = new Date().toISOString();
-    fs.writeFileSync(this.indexPath, JSON.stringify(this.index, null, 2));
+    await this.fileOps.writeFile(this.indexPath, JSON.stringify(this.index, null, 2));
   }
 
   /** Inserts or updates an embedding entry. */

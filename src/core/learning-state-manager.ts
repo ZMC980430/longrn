@@ -3,6 +3,18 @@ import * as path from 'path';
 import { FSRSScheduler, CardState } from './fsrs-scheduler.js';
 
 /**
+ * Pluggable file I/O adapter for LearningStateManager.
+ * Allows Obsidian plugin to inject vault API wrappers instead of Node.js `fs`.
+ * All methods allow both sync (`fs`) and async (Obsidian vault) return types.
+ */
+export interface StateFileOps {
+  exists(filePath: string): boolean | Promise<boolean>;
+  mkdir(dirPath: string): void | Promise<void>;
+  readFile(filePath: string): string | Promise<string>;
+  writeFile(filePath: string, data: string): void | Promise<void>;
+}
+
+/**
  * Learning status for a knowledge node.
  * - unknown:     Not yet encountered
  * - planned:     Added to a learning path
@@ -29,6 +41,14 @@ export interface StateIndex {
   entries: Record<string, LearningState>;
 }
 
+/** Default file ops using Node.js `fs` (sync). */
+export const defaultFileOps: StateFileOps = {
+  exists: (p) => fs.existsSync(p),
+  mkdir: (p) => { fs.mkdirSync(p, { recursive: true }); },
+  readFile: (p) => fs.readFileSync(p, 'utf-8'),
+  writeFile: (p, d) => { fs.writeFileSync(p, d); },
+};
+
 /**
  * Manages learning states for all knowledge graph nodes.
  *
@@ -42,26 +62,32 @@ export class LearningStateManager {
   private statePath: string;
   public index: StateIndex;
   private scheduler: FSRSScheduler;
+  private fileOps: StateFileOps;
 
   /**
    * @param vaultPath - Vault root path; state file stored at `.longrn/state.json`
+   * @param fileOps - Optional file ops adapter (default: Node.js `fs`)
    */
-  constructor(vaultPath: string) {
+  constructor(vaultPath: string, fileOps?: StateFileOps) {
+    this.fileOps = fileOps ?? defaultFileOps;
     const storeDir = path.join(vaultPath, '.longrn');
+    // Use sync check for dir; the rest is async-capable
     if (!fs.existsSync(storeDir)) {
       fs.mkdirSync(storeDir, { recursive: true });
     }
     this.statePath = path.join(storeDir, 'state.json');
     this.index = { updatedAt: '', entries: {} };
     this.scheduler = new FSRSScheduler();
-    this.loadState();
+    // Try loading existing state (silent fail if not found)
+    this.loadState().catch(() => {});
   }
 
   /** Loads persisted states from disk. Returns false if no state file exists. */
-  loadState(): boolean {
+  async loadState(): Promise<boolean> {
     try {
-      if (!fs.existsSync(this.statePath)) return false;
-      const raw = fs.readFileSync(this.statePath, 'utf-8');
+      const exists = await this.fileOps.exists(this.statePath);
+      if (!exists) return false;
+      const raw = await this.fileOps.readFile(this.statePath);
       this.index = JSON.parse(raw);
       return true;
     } catch {
@@ -70,9 +96,9 @@ export class LearningStateManager {
   }
 
   /** Persists the current state index to disk. */
-  saveState(): void {
+  async saveState(): Promise<void> {
     this.index.updatedAt = new Date().toISOString();
-    fs.writeFileSync(this.statePath, JSON.stringify(this.index, null, 2));
+    await this.fileOps.writeFile(this.statePath, JSON.stringify(this.index, null, 2));
   }
 
   /** Ensures a state entry exists for the given note ID, creating it if absent. */
@@ -90,13 +116,13 @@ export class LearningStateManager {
   }
 
   /** Sets the learning status for a node. */
-  setStatus(noteId: string, status: LearningStatus): void {
+  async setStatus(noteId: string, status: LearningStatus): Promise<void> {
     const entry = this.ensureEntry(noteId);
     entry.status = status;
     if (status === 'in_progress' || status === 'mastered') {
       entry.lastReviewedAt = new Date().toISOString();
     }
-    this.saveState();
+    await this.saveState();
   }
 
   /** Returns the current learning status of a node (defaults to 'unknown'). */
@@ -141,7 +167,7 @@ export class LearningStateManager {
    * @param rating - 1=Again 2=Hard 3=Good 4=Easy
    * @returns The updated CardState from the FSRS scheduler
    */
-  recordReview(noteId: string, rating: 1 | 2 | 3 | 4): CardState {
+  async recordReview(noteId: string, rating: 1 | 2 | 3 | 4): Promise<CardState> {
     const entry = this.ensureEntry(noteId);
     const current: CardState = {
       stability: entry.stability,
@@ -164,7 +190,7 @@ export class LearningStateManager {
       entry.status = 'in_progress';
     }
 
-    this.saveState();
+    await this.saveState();
     return next;
   }
 
