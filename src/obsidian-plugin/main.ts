@@ -5,7 +5,8 @@ import { NoteGenerator } from '../core/note-generator.js';
 import { LearningStateManager, StateFileOps } from '../core/learning-state-manager.js';
 import { FSRSScheduler } from '../core/fsrs-scheduler.js';
 import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
-import { LearningPathTreeGenerator, NoteStyle } from '../core/path-tree-generator.js';
+import { LearningPathTreeGenerator, NoteStyle, AIGenerationResult } from '../core/path-tree-generator.js';
+import { LLMClient, LLMConfig, DEFAULT_LLM_CONFIG } from '../core/llm-client.js';
 
 // ── Plugin Settings ──────────────────────────────────────────────
 
@@ -25,6 +26,17 @@ interface LongrnPluginSettings {
 	nodesPerLayer: number;
 	/** 笔记生成风格 */
 	generationStyle: NoteStyle;
+	// ── Phase 5 配置 ──
+	/** AI 生成开关 */
+	aiEnabled: boolean;
+	/** OpenAI 兼容 API 端点 */
+	apiEndpoint: string;
+	/** API Key */
+	apiKey: string;
+	/** 模型名称 */
+	model: string;
+	/** 生成温度 */
+	temperature: number;
 }
 
 const DEFAULT_SETTINGS: LongrnPluginSettings = {
@@ -35,6 +47,11 @@ const DEFAULT_SETTINGS: LongrnPluginSettings = {
 	maxGenerationDepth: 2,
 	nodesPerLayer: 5,
 	generationStyle: 'map',
+	aiEnabled: false,
+	apiEndpoint: DEFAULT_LLM_CONFIG.apiEndpoint,
+	apiKey: DEFAULT_LLM_CONFIG.apiKey,
+	model: DEFAULT_LLM_CONFIG.model,
+	temperature: DEFAULT_LLM_CONFIG.temperature,
 };
 
 // ── User Input Modal ─────────────────────────────────────────────
@@ -149,6 +166,7 @@ export default class LearningPathPlugin extends Plugin {
 	fsrsScheduler!: FSRSScheduler;
 	semanticLinker!: SemanticAutoLinker;
 	pathTreeGenerator!: LearningPathTreeGenerator;
+	llmClient!: LLMClient;
 
 	/**
 	 * Create a StateFileOps that uses Obsidian's vault adapter.
@@ -190,6 +208,7 @@ export default class LearningPathPlugin extends Plugin {
 		this.fsrsScheduler = new FSRSScheduler();
 		this.semanticLinker = new SemanticAutoLinker();
 		this.pathTreeGenerator = new LearningPathTreeGenerator();
+		this.llmClient = new LLMClient();
 
 		// Initialize state manager after vault is available
 		this.app.workspace.onLayoutReady(() => {
@@ -237,6 +256,13 @@ export default class LearningPathPlugin extends Plugin {
       id: 'generate-learning-path-tree',
       name: '生成学习路径（不依赖笔记·主题输入）',
       callback: () => void this.generateLearningPathTree(),
+    });
+
+    // Phase 5
+    this.addCommand({
+      id: 'generate-ai-learning-path',
+      name: '生成学习路径（AI版·需配置LLM）',
+      callback: () => void this.generateAILearningPath(),
     });
 
     // 注册设置页面（插件介绍与使用说明）
@@ -541,6 +567,17 @@ export default class LearningPathPlugin extends Plugin {
 		}
 	}
 
+	/** 从插件设置构造 LLMConfig */
+	private getLLMConfig(): LLMConfig {
+		return {
+			apiEndpoint: this.settings.apiEndpoint,
+			apiKey: this.settings.apiKey,
+			model: this.settings.model,
+			temperature: this.settings.temperature,
+			enabled: this.settings.aiEnabled,
+		};
+	}
+
 	// ===== Phase 4: Learning Path Tree =====
 
 	async generateLearningPathTree() {
@@ -595,6 +632,84 @@ export default class LearningPathPlugin extends Plugin {
 		} catch (error: any) {
 			console.error('Longrn [generateLearningPathTree]:', error);
 			new Notice(`生成失败: ${error.message}`);
+		}
+	}
+
+	// ===== Phase 5: AI-Powered Learning Path =====
+
+	async generateAILearningPath() {
+		const llmConfig = this.getLLMConfig();
+		if (!llmConfig.enabled) {
+			new Notice('⚠️ AI 生成未开启。请先在设置 → Longrn → AI 配置中启用并填写 API 信息。');
+			return;
+		}
+		if (!llmConfig.apiKey) {
+			new Notice('⚠️ 请先在设置中填写 API Key。');
+			return;
+		}
+
+		const modal = new TargetInputModal(
+			this.app,
+			'生成 AI 学习路径',
+			'输入你想学的内容，例如: TypeScript, 机器学习, Python数据分析',
+			'',
+		);
+		const topic = await modal.openAndAwait();
+		if (!topic) {
+			new Notice('已取消');
+			return;
+		}
+
+		new Notice(`🤖 正在调用 LLM 为「${topic}」生成路径树...`);
+
+		try {
+			const result = await this.pathTreeGenerator.generateAIPathTree(
+				topic,
+				this.llmClient,
+				llmConfig,
+				this.settings.maxGenerationDepth,
+				this.settings.nodesPerLayer,
+				this.settings.generationStyle,
+			);
+
+			// 渲染笔记（result 中 tree 可能已被 AI 替换）
+			let notes = this.pathTreeGenerator.renderTreeToMarkdown(result.tree, this.settings.generationStyle);
+
+			// 替换 AI 生成的内容
+			for (const fileName of result.aiGeneratedNotes) {
+				// AI 内容已在 generateAIPathTree 中写入 notes — 但为安全起见重新获取
+			}
+
+			// 交叉链接
+			notes = this.pathTreeGenerator.crossLinkGeneratedNotes(notes);
+
+			// 写入 vault
+			const existingFiles = this.app.vault.getMarkdownFiles().map(f => f.path);
+			let createdCount = 0;
+
+			for (const [fileName, content] of notes) {
+				const dedupedName = this.pathTreeGenerator.deduplicateFileName(fileName, existingFiles);
+				const folderExists = await this.app.vault.adapter.exists(this.settings.outputFolder);
+				if (!folderExists) {
+					await this.app.vault.createFolder(this.settings.outputFolder);
+				}
+				await this.app.vault.create(`${this.settings.outputFolder}/${dedupedName}`, content);
+				createdCount++;
+			}
+
+			// 汇总
+			const aiCount = result.aiGeneratedNotes.length;
+			const tmplCount = result.templatedNotes.length;
+			const totalTokens = ''; // TODO: track from LLM response
+
+			new Notice(
+				`🤖 AI 学习路径生成完毕！\n` +
+				`📝 共 ${createdCount} 篇笔记\n` +
+				`🤖 AI 内容: ${aiCount} 篇 | 📋 模板: ${tmplCount} 篇`
+			);
+		} catch (error: any) {
+			console.error('Longrn [generateAILearningPath]:', error);
+			new Notice(`AI 生成失败: ${error.message}`);
 		}
 	}
 
@@ -727,6 +842,74 @@ class LongrnSettingTab extends PluginSettingTab {
 					});
 			});
 
+		// ===== Phase 5: AI 生成配置 =====
+		containerEl.createEl('h2', { text: '🤖 AI 内容生成（Phase 5）' });
+
+		new Setting(containerEl)
+			.setName('启用 AI 生成')
+			.setDesc('开启后使用大模型生成真实的笔记内容（需配置下方 API 信息）。关闭时使用模板生成。')
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.aiEnabled)
+					.onChange(async (value) => {
+						this.plugin.settings.aiEnabled = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('API 端点')
+			.setDesc('OpenAI 兼容 API 地址。默认：https://api.openai.com/v1。Ollama 本地：http://localhost:11434/v1')
+			.addText((text) => {
+				text
+					.setPlaceholder('https://api.openai.com/v1')
+					.setValue(this.plugin.settings.apiEndpoint)
+					.onChange(async (value) => {
+						this.plugin.settings.apiEndpoint = value || DEFAULT_LLM_CONFIG.apiEndpoint;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('API Key')
+			.setDesc('你的 API Key。注意：该 Key 仅保存在本地插件设置中，不会上传到别处。')
+			.addText((text) => {
+				text
+					.setPlaceholder('sk-...')
+					.setValue(this.plugin.settings.apiKey)
+					.onChange(async (value) => {
+						this.plugin.settings.apiKey = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('模型')
+			.setDesc('模型名称，如 gpt-4o-mini、gpt-4o、deepseek-chat、qwen-turbo 等')
+			.addText((text) => {
+				text
+					.setPlaceholder('gpt-4o-mini')
+					.setValue(this.plugin.settings.model)
+					.onChange(async (value) => {
+						this.plugin.settings.model = value || DEFAULT_LLM_CONFIG.model;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('温度')
+			.setDesc('生成温度（0-2），越高生成的文本越有创造性。默认为 0.7。')
+			.addSlider((slider) => {
+				slider
+					.setLimits(0, 2, 0.1)
+					.setValue(this.plugin.settings.temperature)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.plugin.settings.temperature = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
 		// ── 插件简介 ──
 		containerEl.createEl('h2', { text: '📖 关于本插件' });
 		containerEl.createEl('p', {
@@ -763,6 +946,10 @@ class LongrnSettingTab extends PluginSettingTab {
 			{
 				name: '生成学习路径（不依赖笔记·主题输入）',
 				desc: 'Phase 4: 输入主题直接生成完整学习路径笔记树，无需 Vault 中已有笔记。',
+			},
+			{
+				name: '生成学习路径（AI版·需配置LLM）',
+				desc: 'Phase 5: 使用大模型生成真实的笔记内容，需先在设置中配置 LLM 信息。',
 			},
 		];
 

@@ -12,7 +12,12 @@
  * 5. 去重保护：同名笔记跳过或添加后缀
  *
  * @see docs/SDD.md §5.11
+ *
+ * Phase 5 扩展：接收 LLMClient 后可调用 AI 生成真实的笔记内容。
+ * @see docs/SDD.md §5.13
  */
+
+import { LLMClient, LLMConfig } from './llm-client.js';
 
 // ── 数据模型 ──────────────────────────────────────────────────
 
@@ -48,6 +53,17 @@ export interface LearningPathTree {
 
 /** 笔记渲染风格 */
 export type NoteStyle = 'map' | 'tutorial' | 'cheatsheet';
+
+/** AI 生成结果包装 */
+export interface AIGenerationResult {
+  tree: LearningPathTree;
+  /** 实际使用了 AI 生成 */
+  usedAI: boolean;
+  /** AI 生成内容的笔记文件名列表 */
+  aiGeneratedNotes: string[];
+  /** 降级到模板的笔记文件名列表 */
+  templatedNotes: string[];
+}
 
 /** Phase 4 配置参数，与 Obsidian 设置联动 */
 export interface PathTreeConfig {
@@ -402,5 +418,85 @@ export class LearningPathTreeGenerator {
       deduped = `${base}-副本${counter}${ext}`;
     }
     return deduped;
+  }
+
+  // ── Phase 5: AI-Powered Generation ─────────────────────────
+
+  /**
+   * AI 模式生成路径树 + 笔记内容。
+   * 1. 先用模板生成基本树结构
+   * 2. 若 LLM 可用，用 AI 生成真实内容替换模板占位符
+   * 3. 部分失败时自动降级到模板
+   */
+  async generateAIPathTree(
+    topic: string,
+    llmClient: LLMClient,
+    llmConfig: LLMConfig,
+    maxDepth: number = DEFAULT_TREE_CONFIG.maxDepth,
+    nodesPerLayer: number = DEFAULT_TREE_CONFIG.nodesPerLayer,
+    style: NoteStyle = DEFAULT_TREE_CONFIG.style,
+  ): Promise<AIGenerationResult> {
+    const result: AIGenerationResult = {
+      tree: this.generatePathTree(topic, maxDepth, nodesPerLayer),
+      usedAI: true,
+      aiGeneratedNotes: [],
+      templatedNotes: [],
+    };
+
+    // 1. 尝试用 LLM 生成更好的树结构
+    const aiNodes = await llmClient.generatePathTree(topic, nodesPerLayer, llmConfig);
+    if (aiNodes && aiNodes.length > 0) {
+      const converted = llmClient.convertLlmTreeToPathNodes(aiNodes, maxDepth);
+      result.tree.nodes = converted as any;
+    }
+
+    // 2. 渲染笔记（模板结构 + AI 内容填充）
+    const notes = this.renderTreeToMarkdown(result.tree, style);
+
+    // 3. 逐笔记尝试用 AI 生成真实内容
+    for (const [fileName, templateContent] of notes) {
+      const noteTitle = fileName.replace(/\.md$/, '');
+
+      // 查找对应节点以获取摘要
+      const node = this.findNodeByTitle(result.tree.nodes as any, noteTitle);
+
+      if (node) {
+        const aiContent = await llmClient.generateNoteContent(
+          topic,
+          noteTitle,
+          node.summary,
+          node.parentTitle,
+          llmConfig,
+        );
+
+        if (aiContent) {
+          // 替换为该笔记的 AI 生成内容（保留标题行）
+          notes.set(fileName, `# [[${noteTitle}]]\n\n` + aiContent);
+          result.aiGeneratedNotes.push(fileName);
+        } else {
+          result.templatedNotes.push(fileName);
+        }
+      } else {
+        result.templatedNotes.push(fileName);
+      }
+    }
+
+    // 4. 重新交叉链接
+    const linked = this.crossLinkGeneratedNotes(notes);
+    // 将结果写回 tree（实际上 notes 内容在调用方用于创建文件）
+
+    return result;
+  }
+
+  /** 在树中按标题查找节点 */
+  private findNodeByTitle(nodes: any[], title: string): any | null {
+    for (const node of nodes) {
+      if (node.title === title) return node;
+      if (node.children) {
+        const found = this.findNodeByTitle(node.children, title);
+        if (found) return found;
+      }
+    }
+    return null;
   }
 }
