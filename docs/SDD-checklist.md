@@ -37,12 +37,21 @@
 - [x] Phase 3.1 插件设置系统
 - [x] Phase 3.1 vault API 文件操作替换
 
-## Phase 4 规划项（待实现）
+## Phase 4 规划项（已实现）
 
-- [ ] FR-10 用户输入驱动的学习路径生成
-- [ ] FR-11 可配置的生成粒度（深度/数量/风格）
-- [ ] FR-12 生成笔记自动交叉链接
-- [ ] LearningPathTreeGenerator 核心模块
-- [ ] 多模板渲染引擎（知识导图/教程/速查表）
-- [ ] 去重保护机制
-- [ ] 设置项扩展（maxGenerationDepth / nodesPerLayer / generationStyle）
+- [x] FR-10 用户输入驱动的学习路径生成
+- [x] FR-11 可配置的生成粒度（深度/数量/风格）
+- [x] FR-12 生成笔记自动交叉链接
+- [x] LearningPathTreeGenerator 核心模块
+- [x] 多模板渲染引擎（知识导图/教程/速查表）
+- [x] 去重保护机制
+- [x] 设置项扩展（maxGenerationDepth / nodesPerLayer / generationStyle）
+
+## Phase 5 规划项（待实现）
+
+- [ ] FR-13 AI 学习路径内容生成
+- [ ] FR-14 自定义 LLM 配置（OpenAI API 兼容协议）
+- [ ] LLMClient 核心模块
+- [ ] 笔记提示词模板系统
+- [ ] 回退机制（AI不可用时使用模板生成）
+- [ ] 设置项扩展（apiEndpoint / apiKey / model / temperature）

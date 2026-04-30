@@ -17,7 +17,8 @@
 - **Phase 2（已完成）**：语义向量嵌入、向量存储持久化、语义路径规划、向后兼容。
 - **Phase 3（已完成）**：学习状态管理、FSRS 间隔重复调度、语义模糊自动链接、路径规划状态感知增强。
 - **Phase 3.1（已完成）**：去除硬编码、增加 Modal 交互输入、插件设置系统、修复 `fs`→vault API 文件操作。
-- **Phase 4（规划中）**：用户输入驱动的内容生成——不依赖已有笔记，从零生成学习路径。
+- **Phase 4（已完成）**：用户输入驱动的内容生成——不依赖已有笔记，从零生成学习路径。
+- **Phase 5（规划中）**：AI 内容生成——接入 OpenAI 兼容协议的大模型，生成真实的笔记内容。
 - 后续阶段不包含完整 AI 写作引擎、离线大模型集成等高级功能（预留接口）。
 
 ## 3. 需求说明
@@ -37,7 +38,7 @@
 8. **FR-8 语义模糊自动链接**：在精确匹配基础上，利用语义嵌入对未匹配文本段进行模糊匹配，相似度超过阈值（0.75）时自动建议链接。
 9. **FR-9 路径规划状态感知**：路径规划时自动排除已掌握节点，优先从计划中/进行中的节点出发，为路径步骤附加学习状态标记。
 
-#### Phase 4（规划中）
+#### Phase 4（已完成）
 
 10. **FR-10 用户输入驱动的学习路径生成**：
     - 用户输入学习主题（如"学TypeScript"、"机器学习入门"），插件不依赖已有 vault 笔记，直接生成一份完整的学习路径笔记。
@@ -52,6 +53,17 @@
 12. **FR-12 跨笔记自动链接**：
     - 生成的所有笔记之间自动建立双向 `[[wikilink]]` 链接。
     - 子笔记中自动引用父笔记和相关兄弟笔记。
+
+#### Phase 5（规划中）
+
+13. **FR-13 AI 学习路径内容生成**：
+    - 启用 AI 模式时，调用 LLM 生成真正的学习路径知识点结构和笔记内容。
+    - 每条笔记包含对知识点有实际帮助的文本、示例、代码片段等。
+    - AI 生成内容遵循 Phase 4 的树结构和交叉链接规则。
+14. **FR-14 自定义 LLM 配置**：
+    - 支持配置自定义 API endpoint（兼容 OpenAI 协议即可）。
+    - 支持配置 API Key、Model、Temperature 等参数。
+    - 提供「启用 AI」开关，关闭时降级为 Phase 4 模板生成。
 
 ### 3.2 非功能需求
 - 扩展性：模块化设计，方便后续添加算法与插件适配。
@@ -278,13 +290,69 @@ Phase 4 扩展插件设置项：
 - 笔记间 `[[wikilink]]` 交叉引用正确
 - 重复生成不覆盖已有笔记
 
-### 6.6 Phase 5（规划中）—— 本地大模型集成
+### 6.6 Phase 5（规划中）—— AI 内容生成（OpenAI API）
 
-（原 Phase 4，顺延至 Phase 5）
+**目标**：接入兼容 OpenAI API 协议的大模型（包括 OpenAI、Ollama、vLLM、Claude API 等），
+为 Phase 4 的路径树生成提供 AI 赋能的笔记内容，替代模板化占位符。
 
-1. 本地大模型集成（Llama.cpp 等离线推理引擎）。
-2. AI 辅助生成笔记内容。
-3. 智能问答接口。
+**核心功能**：
+1. **LLMClient 模块**：封装 OpenAI API 协议，支持自定义 endpoint、API Key、model、temperature。
+2. **AI 主题分解**：用 LLM 将用户输入的主题拆解为真实的知识点树（而非通用阶段模板）。
+3. **AI 内容填充**：每个知识点笔记由 LLM 生成真正的内容（概念解释、关键要点、示例代码等）。
+4. **回退机制**：LLM 不可用时（无 API Key / 网络不通），自动降级使用 Phase 4 模板生成。
+5. **设置项扩展**：`apiEndpoint`（默认 https://api.openai.com/v1）、`apiKey`、`model`（默认 gpt-4o-mini）、`temperature`（默认 0.7）、`useAI`（启用/关闭 AI 生成）。
+
+**新增需求**：
+
+#### Phase 5（规划中）
+
+13. **FR-13 AI 学习路径内容生成**：
+    - 启用 AI 模式时，调用 LLM 生成真正的学习路径知识点结构和笔记内容。
+    - 每条笔记包含对知识点有实际帮助的文本、示例、代码片段等。
+    - AI 生成内容遵循 Phase 4 的树结构和交叉链接规则。
+14. **FR-14 自定义 LLM 配置**：
+    - 支持配置自定义 API endpoint（兼容 OpenAI 协议即可）。
+    - 支持配置 API Key、Model、Temperature 等参数。
+    - 提供「启用 AI」开关，关闭时降级为 Phase 4 模板生成。
+
+#### 模块详细设计
+
+### 5.13 LLM 客户端（Phase 5 新增）
+
+输入：系统提示词、用户提示词、配置参数
+输出：LLM 生成的 JSON 或 Markdown 文本
+
+职责：
+- 封装 OpenAI Chat Completions API
+- 支持流式与非流式响应
+- 错误处理和自动重试
+- 兼容 OpenAI、Ollama、vLLM、Claude 等兼容协议的服务
+
+数据模型：
+```typescript
+interface LLMConfig {
+  apiEndpoint: string;   // 默认 https://api.openai.com/v1
+  apiKey: string;
+  model: string;         // 默认 gpt-4o-mini
+  temperature: number;   // 默认 0.7
+}
+
+interface LLMMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+interface LLMResponse {
+  content: string;
+  model: string;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+}
+```
+
+关键函数：
+- `chat(messages: LLMMessage[], config: LLMConfig): Promise<LLMResponse>`
+- `generatePathTree(topic: string): Promise<PathTreeNode[]>`
+- `generateNoteContent(node: PathTreeNode): Promise<string>`
 
 ### 6.7 Phase 6（规划中）—— 高级可视化
 
