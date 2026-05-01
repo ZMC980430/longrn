@@ -1,3 +1,13 @@
+/**
+ * Minimal type declarations for the Logseq SDK (`@logseq/libs`).
+ *
+ * Only declares the subset of the global `logseq` API used by Longrn:
+ * - `Editor`: page/block CRUD, slash command registration
+ * - `UI`: toast notifications
+ * - `ready()`: plugin lifecycle callback
+ *
+ * At runtime, `@logseq/libs` augments the global scope.
+ */
 declare global {
   interface Logseq {
     Editor: {

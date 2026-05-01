@@ -6,6 +6,14 @@ import { LearningStateManager } from '../core/learning-state-manager.js';
 import { FSRSScheduler } from '../core/fsrs-scheduler.js';
 import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
 
+/**
+ * Longrn — Logseq plugin entry point.
+ *
+ * Registers five Slash commands across three phases:
+ * - **Phase 1**: `生成学习路径`
+ * - **Phase 2**: `语义生成学习路径`
+ * - **Phase 3**: `状态感知学习路径`, `查看学习统计`, `生成复习笔记`
+ */
 async function main() {
   console.log('Logseq Learning Path Plugin loaded (Phase 3)');
 
@@ -30,6 +38,7 @@ async function main() {
     await generateStateAwarePath(kbBuilder, pathPlanner, noteGenerator, fsrsScheduler);
   });
 
+  /** Displays learning stats (mastered, in-progress, due today). */
   logseq.Editor.registerSlashCommand('查看学习统计', async () => {
     await showLearningStats(kbBuilder);
   });
@@ -39,6 +48,9 @@ async function main() {
   });
 }
 
+/**
+ * Scans all Logseq pages and builds a Map<title, Note> for linking.
+ */
 async function buildKnowledgeBase(kbBuilder: KnowledgeBaseBuilder): Promise<Map<string, Note>> {
   const allPages = await logseq.Editor.getAllPages();
   if (!allPages) return new Map();
@@ -63,6 +75,9 @@ async function buildKnowledgeBase(kbBuilder: KnowledgeBaseBuilder): Promise<Map<
   return kb;
 }
 
+/**
+ * Phase 1: Generates a BFS/DFS learning path from a target and creates pages.
+ */
 async function generateLearningPath(kbBuilder: KnowledgeBaseBuilder, pathPlanner: PathPlanner, noteGenerator: NoteGenerator) {
   try {
     const notes = Array.from((await buildKnowledgeBase(kbBuilder)).values());
@@ -97,8 +112,9 @@ async function generateLearningPath(kbBuilder: KnowledgeBaseBuilder, pathPlanner
   }
 }
 
-// ===== Phase 2: Semantic Path =====
-
+/**
+ * Phase 2: Generates a semantic learning path using embedding similarity.
+ */
 async function generateSemanticPath(kbBuilder: KnowledgeBaseBuilder, pathPlanner: PathPlanner, noteGenerator: NoteGenerator) {
   try {
     logseq.UI.showMsg('开始分析知识库...');
@@ -137,8 +153,9 @@ async function generateSemanticPath(kbBuilder: KnowledgeBaseBuilder, pathPlanner
   }
 }
 
-// ===== Phase 3: State-Aware Path & Review =====
-
+/**
+ * Phase 3: State-aware path generation that skips mastered nodes.
+ */
 async function generateStateAwarePath(
   kbBuilder: KnowledgeBaseBuilder,
   pathPlanner: PathPlanner,
@@ -192,6 +209,7 @@ async function generateStateAwarePath(
   }
 }
 
+/** Displays learning stats (mastered, in-progress, due today). */
 async function showLearningStats(kbBuilder: KnowledgeBaseBuilder) {
   try {
     const vaultPath = '/tmp/longrn-logseq';
@@ -210,6 +228,10 @@ async function showLearningStats(kbBuilder: KnowledgeBaseBuilder) {
   }
 }
 
+/**
+ * Phase 3: Generates review notes for due items (or random mastered nodes
+ * if nothing is due), using the FSRS review template.
+ */
 async function generateReviewNote(
   kbBuilder: KnowledgeBaseBuilder,
   noteGenerator: NoteGenerator,

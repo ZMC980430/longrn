@@ -3,26 +3,55 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { EmbeddingEngine } from './embedding-engine.js';
 import { VectorStore, ScoredNote } from './vector-store.js';
+import type { StateFileOps } from './learning-state-manager.js';
 
+/**
+ * Represents a single note/article from the user's knowledge base.
+ */
 export interface Note {
+  /** Unique identifier (UUID for scanned notes, file path for Obsidian) */
   id: string;
+  /** Note title, extracted from first # heading or file name */
   title: string;
+  /** Relative file path within vault */
   path: string;
+  /** Full Markdown content */
   content: string;
+  /** Extracted #tags */
   tags: string[];
+  /** Extracted [[wikilinks]] */
   links: string[];
+  /** Optional semantic embedding vector (set after embedAll) */
   embeddings?: number[];
 }
 
+/**
+ * Directed graph representing relationships between notes.
+ * Nodes = notes, Edges = link/tag relationships.
+ */
 export interface KnowledgeGraph {
   nodes: Map<string, Note>;
   edges: Map<string, { from: string; to: string; type: 'link' | 'tag' }>;
 }
 
+/**
+ * Core engine for scanning, parsing, and building a knowledge graph.
+ *
+ * Responsibilities:
+ * - Scan a directory of Markdown files
+ * - Extract title, tags, and wikilinks from each file
+ * - Build a graph structure based on links and shared tags
+ * - Generate and cache semantic embeddings (Phase 2)
+ */
 export class KnowledgeBaseBuilder {
   private embeddingEngine?: EmbeddingEngine;
   private vectorStore?: VectorStore;
 
+  /**
+   * Scans a directory for .md files and parses each into a Note.
+   * @param vaultPath - Absolute path to the vault directory
+   * @returns Array of parsed Note objects
+   */
   scanVault(vaultPath: string): Note[] {
     const files = fs.readdirSync(vaultPath).filter(f => f.endsWith('.md'));
     return files.map(file => {
@@ -40,6 +69,12 @@ export class KnowledgeBaseBuilder {
     });
   }
 
+  /**
+   * Parses a Markdown string to extract title, tags, and links.
+   * Title → first `# Title` line, or file name if absent.
+   * Tags → `#tag` patterns (word characters only).
+   * Links → `[[wikilink]]` patterns.
+   */
   parseNote(content: string, fileName: string = ''): { title: string; tags: string[]; links: string[] } {
     const lines = content.split('\n');
     const title = lines[0].startsWith('# ') ? lines[0].substring(2).trim() : fileName.replace(/\.md$/i, '');
@@ -48,6 +83,12 @@ export class KnowledgeBaseBuilder {
     return { title, tags, links };
   }
 
+  /**
+   * Builds a KnowledgeGraph from notes.
+   * - Creates a node for each note.
+   * - Creates a 'link' edge when note A [[links]] to note B.
+   * - Creates a 'tag' edge when two notes share a #tag.
+   */
   buildGraph(notes: Note[]): KnowledgeGraph {
     const nodes = new Map<string, Note>();
     const edges = new Map<string, { from: string; to: string; type: 'link' | 'tag' }>();
@@ -74,7 +115,13 @@ export class KnowledgeBaseBuilder {
 
   // ===== Phase 2: Semantic Embedding =====
 
-  async embedAll(notes: Note[], vaultPath: string): Promise<void> {
+  /**
+   * Generates and caches semantic embeddings for all notes.
+   * - Loads the embedding model lazily.
+   * - Uses VectorStore for caching: skips notes whose content hash hasn't changed.
+   * - Only embeds notes that are new or have changed content.
+   */
+  async embedAll(notes: Note[], vaultPath: string, fileOps?: StateFileOps): Promise<void> {
     this.embeddingEngine = new EmbeddingEngine();
     await this.embeddingEngine.loadModel();
 
@@ -82,8 +129,9 @@ export class KnowledgeBaseBuilder {
       vaultPath,
       this.embeddingEngine.getModelName(),
       this.embeddingEngine.getDimensions(),
+      fileOps,
     );
-    this.vectorStore.load();
+    await this.vectorStore.load();
 
     const toEmbed: Note[] = [];
     const texts: string[] = [];
@@ -109,7 +157,7 @@ export class KnowledgeBaseBuilder {
         note.embeddings = emb;
         this.vectorStore!.upsert(note.id, emb, VectorStore.hashContent(note.content));
       });
-      this.vectorStore.save();
+      await this.vectorStore.save();
     }
 
     // Restore remaining from cache that weren't in toEmbed
@@ -123,6 +171,10 @@ export class KnowledgeBaseBuilder {
     }
   }
 
+  /**
+   * Performs semantic search across notes using a natural-language query.
+   * @throws If embedAll() hasn't been called first.
+   */
   async searchSemantic(query: string, notes: Note[], k = 5): Promise<ScoredNote[]> {
     if (!this.embeddingEngine || !this.vectorStore) {
       throw new Error('EmbeddingEngine not loaded. Call embedAll() first.');
@@ -131,10 +183,12 @@ export class KnowledgeBaseBuilder {
     return this.vectorStore.search(queryEmb, k, notes);
   }
 
+  /** Returns the internal EmbeddingEngine instance, if loaded. */
   getEmbeddingEngine(): EmbeddingEngine | undefined {
     return this.embeddingEngine;
   }
 
+  /** Returns the internal VectorStore instance, if loaded. */
   getVectorStore(): VectorStore | undefined {
     return this.vectorStore;
   }

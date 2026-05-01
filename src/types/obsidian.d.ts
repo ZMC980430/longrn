@@ -1,3 +1,15 @@
+/**
+ * Minimal type declarations for the Obsidian API.
+ *
+ * Only declares the subset of types used by the Longrn plugin:
+ * - `Plugin`, `Component` — base classes for plugin lifecycle
+ * - `Notice`, `PluginSettingTab`, `Setting` — UI components
+ * - `Vault`, `DataAdapter`, `TFile` — file system access
+ * - `Workspace`, `MetadataCache` — workspace introspection
+ *
+ * At runtime, these types are provided by the Obsidian app.
+ * This file exists to satisfy the TypeScript compiler during development.
+ */
 declare module 'obsidian' {
   export class Component {
     app: App;

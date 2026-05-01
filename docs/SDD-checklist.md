@@ -25,7 +25,7 @@
 - [x] 语义路径规划器支持基于嵌入的路径生成
 - [x] 确保向后兼容性，支持非语义路径规划
 
-## Phase 3 规划项
+## Phase 3 & 3.1 规划项
 
 - [x] FR-6 学习状态管理器：五状态模型持久化与批量查询
 - [x] FR-7 FSRS 复习调度器：FSRS-5 算法、待复习列表、复习笔记模板
@@ -33,3 +33,25 @@
 - [x] FR-9 路径规划状态感知：排除已掌握节点、附加状态标记
 - [x] Phase 3 单元测试：6 组验证全部通过
 - [x] Phase 3 集成测试：端到端复习流程验证
+- [x] Phase 3.1 交互式 Modal 输入
+- [x] Phase 3.1 插件设置系统
+- [x] Phase 3.1 vault API 文件操作替换
+
+## Phase 4 规划项（已实现）
+
+- [x] FR-10 用户输入驱动的学习路径生成
+- [x] FR-11 可配置的生成粒度（深度/数量/风格）
+- [x] FR-12 生成笔记自动交叉链接
+- [x] LearningPathTreeGenerator 核心模块
+- [x] 多模板渲染引擎（知识导图/教程/速查表）
+- [x] 去重保护机制
+- [x] 设置项扩展（maxGenerationDepth / nodesPerLayer / generationStyle）
+
+## Phase 5 规划项（待实现）
+
+- [ ] FR-13 AI 学习路径内容生成
+- [ ] FR-14 自定义 LLM 配置（OpenAI API 兼容协议）
+- [ ] LLMClient 核心模块
+- [ ] 笔记提示词模板系统
+- [ ] 回退机制（AI不可用时使用模板生成）
+- [ ] 设置项扩展（apiEndpoint / apiKey / model / temperature）

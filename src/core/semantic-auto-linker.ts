@@ -4,6 +4,19 @@ import { NoteGenerator } from './note-generator.js';
 
 const DEFAULT_SEMANTIC_THRESHOLD = 0.75;
 
+/**
+ * Two-layer auto-linker that combines exact and semantic matching.
+ *
+ * **Layer 1 — Exact match**: replaces bare note titles with `[[wikilinks]]`
+ * using a longest-match-first strategy (reuses NoteGenerator.autoLink).
+ *
+ * **Layer 2 — Semantic fuzzy match**: splits content into paragraphs,
+ * embeds each via EmbeddingEngine, and appends `> 相关：[[Title]]` suggestions
+ * when cosine similarity exceeds a configurable threshold.
+ *
+ * **Cross-linking** (`crossLinkBatch`): computes pairwise semantic similarity
+ * among a batch of notes and injects bidirectional `[[wikilinks]]`.
+ */
 export class SemanticAutoLinker {
   private noteGenerator: NoteGenerator;
 
