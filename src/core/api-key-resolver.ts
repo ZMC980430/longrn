@@ -16,7 +16,7 @@ export interface ApiKeySourceOptions {
   vaultFilePath?: string;
   vaultJsonPath?: string;
   manualKey?: string;
-  vaultAdapter?: any;
+  vaultAdapter?: { read: (path: string) => Promise<string> };
 }
 
 // ── 核心解析器 ────────────────────────────────────────────────
@@ -66,15 +66,15 @@ export class ApiKeyResolver {
    * 从 Vault 内 JSON 文件读取 API Key。
    * 支持点号分隔的 JSON 路径表达式（如 deepseek.apiKey）。
    */
-  async fromVaultFile(vaultPath: string, jsonPath: string, adapter: any): Promise<string | null> {
+  async fromVaultFile(vaultPath: string, jsonPath: string, adapter: { read: (path: string) => Promise<string> }): Promise<string | null> {
     try {
       const content = await adapter.read(vaultPath);
       const data = JSON.parse(content);
       const parts = jsonPath.split('.');
-      let value: any = data;
+      let value: unknown = data;
       for (const part of parts) {
         if (value == null || typeof value !== 'object') return null;
-        value = value[part];
+        value = (value as Record<string, unknown>)[part];
       }
       return typeof value === 'string' ? value : null;
     } catch (e) {

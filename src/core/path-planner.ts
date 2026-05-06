@@ -1,6 +1,5 @@
 import { Note, KnowledgeGraph } from './knowledge-builder.js';
 import { EmbeddingEngine } from './embedding-engine.js';
-import { ScoredNote } from './vector-store.js';
 import { LearningStateManager, LearningStatus } from './learning-state-manager.js';
 
 /**

@@ -5,9 +5,9 @@ import { NoteGenerator } from '../core/note-generator.js';
 import { LearningStateManager, StateFileOps } from '../core/learning-state-manager.js';
 import { FSRSScheduler } from '../core/fsrs-scheduler.js';
 import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
-import { LearningPathTreeGenerator, NoteStyle, AIGenerationResult } from '../core/path-tree-generator.js';
+import { LearningPathTreeGenerator, NoteStyle } from '../core/path-tree-generator.js';
 import { LLMClient, LLMConfig, DEFAULT_LLM_CONFIG } from '../core/llm-client.js';
-import { ApiKeyResolver, ApiKeySource, ApiKeySourceOptions } from '../core/api-key-resolver.js';
+import { ApiKeyResolver, ApiKeySource } from '../core/api-key-resolver.js';
 
 // ── Plugin Settings ──────────────────────────────────────────────
 
@@ -170,7 +170,7 @@ export default class LearningPathPlugin extends Plugin {
 
 	/** Get vault base path (DataAdapter.basePath is not in public types) */
 	private get vaultBasePath(): string {
-		return (this.app.vault.adapter as any).basePath;
+		return (this.app.vault.adapter as unknown as { basePath: string }).basePath;
 	}
 
 	kbBuilder!: KnowledgeBaseBuilder;
@@ -389,9 +389,9 @@ export default class LearningPathPlugin extends Plugin {
 			await this.generateNotesWithVault(selectedPath.steps);
 
 			new Notice(`「${target}」学习路径笔记生成完成！（${selectedPath.steps.length} 篇笔记）`);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateLearningPath]:', error);
-			new Notice(`生成失败: ${error.message}`);
+			new Notice(`生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
@@ -438,9 +438,9 @@ export default class LearningPathPlugin extends Plugin {
 				.map((s, i) => `${i + 1}. ${s.title} (${(semanticPath.scores?.[i] ?? 0).toFixed(3)})`)
 				.join(', ');
 			new Notice(`语义路径生成完成！\n${stepsPreview}`);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateSemanticPath]:', error);
-			new Notice(`语义路径生成失败: ${error.message}`);
+			new Notice(`语义路径生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
@@ -498,9 +498,9 @@ export default class LearningPathPlugin extends Plugin {
 				.map((s, i) => `${i + 1}. ${s.title} [${selectedPath.states?.[i] ?? 'unknown'}]`)
 				.join(' | ');
 			new Notice(`状态感知路径生成完成！\n${stepInfo}`);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateStateAwarePath]:', error);
-			new Notice(`状态感知路径生成失败: ${error.message}`);
+			new Notice(`状态感知路径生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
@@ -526,9 +526,9 @@ export default class LearningPathPlugin extends Plugin {
 				`已掌握: ${stats.mastered} | 学习中: ${stats.inProgress}\n` +
 				`今日待复习: ${dueIds.length} 项`,
 			);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [showReviewList]:', error);
-			new Notice(`获取复习列表失败: ${error.message}`);
+			new Notice(`获取复习列表失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
@@ -575,9 +575,9 @@ export default class LearningPathPlugin extends Plugin {
 
 			await this.app.vault.create(filePath, reviewLines.join('\n---\n'));
 			new Notice(`复习笔记已创建（${reviewIds.length} 项）: ${filePath}`);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateReviewNote]:', error);
-			new Notice(`生成复习笔记失败: ${error.message}`);
+			new Notice(`生成复习笔记失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
@@ -591,7 +591,7 @@ export default class LearningPathPlugin extends Plugin {
 				vaultFilePath: this.settings.apiKeyVaultFilePath,
 				vaultJsonPath: this.settings.apiKeyVaultJsonPath,
 				manualKey: this.settings.apiKey,
-				vaultAdapter: (this.app.vault.adapter as any),
+				vaultAdapter: (this.app.vault.adapter as unknown as { read: (path: string) => Promise<string> }),
 			}
 		);
 		return {
@@ -654,9 +654,9 @@ export default class LearningPathPlugin extends Plugin {
 			}
 
 			new Notice(`🎉 已生成 ${createdCount} 篇 ${topic} 学习路径笔记！`);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateLearningPathTree]:', error);
-			new Notice(`生成失败: ${error.message}`);
+			new Notice(`生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
@@ -701,7 +701,7 @@ export default class LearningPathPlugin extends Plugin {
 			let notes = this.pathTreeGenerator.renderTreeToMarkdown(result.tree, this.settings.generationStyle);
 
 			// 替换 AI 生成的内容
-			for (const fileName of result.aiGeneratedNotes) {
+			for (const _fileName of result.aiGeneratedNotes) {
 				// AI 内容已在 generateAIPathTree 中写入 notes — 但为安全起见重新获取
 			}
 
@@ -725,16 +725,15 @@ export default class LearningPathPlugin extends Plugin {
 			// 汇总
 			const aiCount = result.aiGeneratedNotes.length;
 			const tmplCount = result.templatedNotes.length;
-			const totalTokens = ''; // TODO: track from LLM response
 
 			new Notice(
 				`🤖 AI 学习路径生成完毕！\n` +
 				`📝 共 ${createdCount} 篇笔记\n` +
 				`🤖 AI 内容: ${aiCount} 篇 | 📋 模板: ${tmplCount} 篇`
 			);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateAILearningPath]:', error);
-			new Notice(`AI 生成失败: ${error.message}`);
+			new Notice(`AI 生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
