@@ -7,6 +7,7 @@ import { FSRSScheduler } from '../core/fsrs-scheduler.js';
 import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
 import { LearningPathTreeGenerator, NoteStyle, AIGenerationResult } from '../core/path-tree-generator.js';
 import { LLMClient, LLMConfig, DEFAULT_LLM_CONFIG } from '../core/llm-client.js';
+import { ApiKeyResolver, ApiKeySource, ApiKeySourceOptions } from '../core/api-key-resolver.js';
 
 // ── Plugin Settings ──────────────────────────────────────────────
 
@@ -37,6 +38,15 @@ interface LongrnPluginSettings {
 	model: string;
 	/** 生成温度 */
 	temperature: number;
+	// ── Phase 5.1 配置 ──
+	/** API Key 来源 */
+	apiKeySource: ApiKeySource;
+	/** localStorage 中的 Key 名称（apiKeySource=obsidian-localstorage 时使用） */
+	apiKeyLocalStorageName: string;
+	/** Vault 内 JSON 文件路径（apiKeySource=vault-file 时使用） */
+	apiKeyVaultFilePath: string;
+	/** JSON 文件中的 Key 路径表达式（apiKeySource=vault-file 时使用） */
+	apiKeyVaultJsonPath: string;
 }
 
 const DEFAULT_SETTINGS: LongrnPluginSettings = {
@@ -52,6 +62,10 @@ const DEFAULT_SETTINGS: LongrnPluginSettings = {
 	apiKey: DEFAULT_LLM_CONFIG.apiKey,
 	model: DEFAULT_LLM_CONFIG.model,
 	temperature: DEFAULT_LLM_CONFIG.temperature,
+	apiKeySource: 'manual',
+	apiKeyLocalStorageName: 'deepseekApiKey',
+	apiKeyVaultFilePath: '.obsidian/longrn-providers.json',
+	apiKeyVaultJsonPath: 'deepseek.apiKey',
 };
 
 // ── User Input Modal ─────────────────────────────────────────────
@@ -567,11 +581,22 @@ export default class LearningPathPlugin extends Plugin {
 		}
 	}
 
-	/** 从插件设置构造 LLMConfig */
-	private getLLMConfig(): LLMConfig {
+	/** 从插件设置构造 LLMConfig（异步解析 API Key） */
+	private async getLLMConfig(): Promise<LLMConfig> {
+		const resolver = new ApiKeyResolver();
+		const resolvedKey = await resolver.resolve(
+			this.settings.apiKeySource,
+			{
+				localStorageKeyName: this.settings.apiKeyLocalStorageName,
+				vaultFilePath: this.settings.apiKeyVaultFilePath,
+				vaultJsonPath: this.settings.apiKeyVaultJsonPath,
+				manualKey: this.settings.apiKey,
+				vaultAdapter: (this.app.vault.adapter as any),
+			}
+		);
 		return {
 			apiEndpoint: this.settings.apiEndpoint,
-			apiKey: this.settings.apiKey,
+			apiKey: resolvedKey || '',
 			model: this.settings.model,
 			temperature: this.settings.temperature,
 			enabled: this.settings.aiEnabled,
@@ -638,13 +663,13 @@ export default class LearningPathPlugin extends Plugin {
 	// ===== Phase 5: AI-Powered Learning Path =====
 
 	async generateAILearningPath() {
-		const llmConfig = this.getLLMConfig();
+		const llmConfig = await this.getLLMConfig();
 		if (!llmConfig.enabled) {
 			new Notice('⚠️ AI 生成未开启。请先在设置 → Longrn → AI 配置中启用并填写 API 信息。');
 			return;
 		}
 		if (!llmConfig.apiKey) {
-			new Notice('⚠️ 请先在设置中填写 API Key。');
+			new Notice('无法获取 API Key，请检查设置 → Longrn → API Key 来源配置');
 			return;
 		}
 
@@ -901,18 +926,75 @@ class LongrnSettingTab extends PluginSettingTab {
 			});
 		}
 
+		// API Key 来源选择
 		new Setting(containerEl)
-			.setName('API Key')
-			.setDesc('你的 API Key。注意：该 Key 仅保存在本地插件设置中，不会上传到别处。Ollama 等本地服务可留空。')
-			.addText((text) => {
-				text
-					.setPlaceholder('sk-...')
-					.setValue(this.plugin.settings.apiKey)
+			.setName('API Key 来源')
+			.setDesc('选择从哪里获取 API Key')
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption('manual', '手动输入')
+					.addOption('obsidian-localstorage', 'Obsidian localStorage')
+					.addOption('vault-file', 'Vault 文件')
+					.setValue(this.plugin.settings.apiKeySource)
 					.onChange(async (value) => {
-						this.plugin.settings.apiKey = value;
+						this.plugin.settings.apiKeySource = value as ApiKeySource;
 						await this.plugin.saveSettings();
+						this.display();
 					});
 			});
+
+		if (this.plugin.settings.apiKeySource === 'obsidian-localstorage') {
+			new Setting(containerEl)
+				.setName('localStorage Key 名称')
+				.setDesc('在 Obsidian localStorage 中存储 API Key 的键名')
+				.addText((text) => {
+					text.setPlaceholder('deepseekApiKey')
+						.setValue(this.plugin.settings.apiKeyLocalStorageName)
+						.onChange(async (value) => {
+							this.plugin.settings.apiKeyLocalStorageName = value;
+							await this.plugin.saveSettings();
+						});
+				});
+		}
+
+		if (this.plugin.settings.apiKeySource === 'vault-file') {
+			new Setting(containerEl)
+				.setName('Vault 文件路径')
+				.setDesc('相对于 Vault 根目录的 JSON 文件路径')
+				.addText((text) => {
+					text.setPlaceholder('.obsidian/longrn-providers.json')
+						.setValue(this.plugin.settings.apiKeyVaultFilePath)
+						.onChange(async (value) => {
+							this.plugin.settings.apiKeyVaultFilePath = value;
+							await this.plugin.saveSettings();
+						});
+				});
+			new Setting(containerEl)
+				.setName('JSON Key 路径')
+				.setDesc('用点号分隔的 JSON 路径')
+				.addText((text) => {
+					text.setPlaceholder('deepseek.apiKey')
+						.setValue(this.plugin.settings.apiKeyVaultJsonPath)
+						.onChange(async (value) => {
+							this.plugin.settings.apiKeyVaultJsonPath = value;
+							await this.plugin.saveSettings();
+						});
+				});
+		}
+
+		if (this.plugin.settings.apiKeySource === 'manual') {
+			new Setting(containerEl)
+				.setName('API Key')
+				.setDesc('你的 API Key。仅保存在本地。')
+				.addText((text) => {
+					text.setPlaceholder('sk-...')
+						.setValue(this.plugin.settings.apiKey)
+						.onChange(async (value) => {
+							this.plugin.settings.apiKey = value;
+							await this.plugin.saveSettings();
+						});
+				});
+		}
 
 		new Setting(containerEl)
 			.setName('模型')
