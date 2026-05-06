@@ -20,6 +20,7 @@
 - **Phase 4（已完成）**：用户输入驱动的内容生成——不依赖已有笔记，从零生成学习路径。
 - **Phase 5（已完成）**：AI 内容生成——接入 OpenAI 兼容协议的大模型，生成真实的笔记内容。
 - **Phase 5.1（已完成）**：灵活 API Key 获取——支持从 Obsidian localStorage / Vault 文件等来源自动解析 API Key。
+- **Phase 5.2（规划中）**：CLI 命令行支持——通过 Obsidian CLI 直接调用插件命令，无需打开 GUI。
 - 后续阶段不包含完整 AI 写作引擎、离线大模型集成等高级功能（预留接口）。
 
 ## 3. 需求说明
@@ -69,6 +70,11 @@
     - 插件设置新增 `apiKeySource` 字段，支持 `manual` / `obsidian-localstorage` / `vault-file` 三种来源。
     - 来源失败时自动回退到手动输入的 API Key。
     - 模型、端点、温度等参数仍由插件设置控制，仅 API Key 从指定来源动态解析。
+16. **FR-16 CLI 命令行支持**：
+    - 提供 CLI 脚本 `scripts/longrn-cli.mjs`，通过 Obsidian CLI 代理调用插件命令。
+    - 支持常用命令：生成学习路径、查看复习列表、生成复习笔记。
+    - 每个命令自动处理 Obsidian CLI 认证和 Vault 定位。
+    - 不支持通过 CLI 修改插件配置。
 
 ### 3.2 非功能需求
 - 扩展性：模块化设计，方便后续添加算法与插件适配。
@@ -427,17 +433,47 @@ class ApiKeyResolver {
 - 所有来源均失败时，给出明确提示而非静默失败
 - 切换来源后无需重启 Obsidian 即可生效
 
-### 6.8 Phase 6（规划中）—— 高级可视化
+### 6.8 Phase 5.2（规划中）—— CLI 命令行支持
 
-（原 Phase 5，顺延至 Phase 6）
+**背景**：当前插件所有命令需要通过 Obsidian GUI 命令面板手动触发。
+对于开发者或自动化场景（CI/CD、定时任务、批量处理），需要通过命令行直接调用插件功能。
+
+**目标**：提供 CLI 脚本封装 Obsidian CLI，支持直接在终端调用 longrn 核心命令。
+
+**核心功能**：
+1. **CLI 脚本 `scripts/longrn-cli.mjs`**：
+   - 基于 Node.js，通过 `child_process` 调用 Obsidian CLI 的 `command` / `eval` 子命令。
+   - 自动检测 Obsidian 安装路径和 Vault 名称。
+   - 提供友好的命令行接口和帮助信息。
+2. **支持的命令**：
+   - `generate-path <topic>` — 生成学习路径（Phase 1，BFS/DFS）
+   - `generate-semantic-path <query>` — 语义生成学习路径（Phase 2）
+   - `generate-path-tree <topic>` — 生成路径树（Phase 4，模板模式）
+   - `generate-ai-path <topic>` — AI 生成学习路径（Phase 5，需 API Key 配置）
+   - `show-review-list` — 查看今日待复习列表（Phase 3）
+   - `generate-review-note` — 生成复习笔记（Phase 3）
+3. **参数传递**：
+   - 对于需要用户输入的命令（学习目标），通过 Obsidian CLI `eval` 直接调用插件方法并传入参数，跳过 Modal。
+   - 不需要输入的命令直接通过 `command` 子命令触发。
+4. **输出格式**：
+   - 默认输出人类可读的文本摘要。
+   - 支持 `--json` 输出结构化结果。
+5. **不包含的功能**：
+   - 不支持 CLI 修改插件配置（配置通过 Obsidian GUI 管理）。
+   - 不创建独立的后台服务。
+
+**验证**：
+- `node scripts/longrn-cli.mjs show-review-list` 输出今日复习统计
+- `node scripts/longrn-cli.mjs generate-path "Python"` 在 vault 中创建学习路径笔记
+- `node scripts/longrn-cli.mjs --help` 显示完整帮助信息
+- 未开启 Obsidian 时给出明确的错误提示
+
+### 6.9 Phase 6（规划中）—— 高级可视化
 
 1. Obsidian Canvas 集成。
 2. 多领域知识图谱可视化。
-3. CLI 工具。
 
-### 6.9 Phase 7（规划中）—— 协作与社交
-
-（原 Phase 6，顺延至 Phase 7）
+### 6.10 Phase 7（规划中）—— 协作与社交
 
 1. 协作学习功能。
 2. 学习进度可视化仪表盘。
@@ -451,4 +487,4 @@ class ApiKeyResolver {
 
 ## 8. 备注
 
-Phase 1、Phase 2、Phase 3、Phase 3.1、Phase 4、Phase 5、Phase 5.1 均已实现并通过验证。
+Phase 1、Phase 2、Phase 3、Phase 3.1、Phase 4、Phase 5、Phase 5.1 均已实现并通过验证。Phase 5.2 为当前开发阶段。
