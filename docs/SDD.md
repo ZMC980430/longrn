@@ -18,7 +18,8 @@
 - **Phase 3（已完成）**：学习状态管理、FSRS 间隔重复调度、语义模糊自动链接、路径规划状态感知增强。
 - **Phase 3.1（已完成）**：去除硬编码、增加 Modal 交互输入、插件设置系统、修复 `fs`→vault API 文件操作。
 - **Phase 4（已完成）**：用户输入驱动的内容生成——不依赖已有笔记，从零生成学习路径。
-- **Phase 5（规划中）**：AI 内容生成——接入 OpenAI 兼容协议的大模型，生成真实的笔记内容。
+- **Phase 5（已完成）**：AI 内容生成——接入 OpenAI 兼容协议的大模型，生成真实的笔记内容。
+- **Phase 5.1（已完成）**：灵活 API Key 获取——支持从 Obsidian localStorage / Vault 文件等来源自动解析 API Key。
 - 后续阶段不包含完整 AI 写作引擎、离线大模型集成等高级功能（预留接口）。
 
 ## 3. 需求说明
@@ -54,7 +55,7 @@
     - 生成的所有笔记之间自动建立双向 `[[wikilink]]` 链接。
     - 子笔记中自动引用父笔记和相关兄弟笔记。
 
-#### Phase 5（规划中）
+#### Phase 5 & 5.1（已完成）
 
 13. **FR-13 AI 学习路径内容生成**：
     - 启用 AI 模式时，调用 LLM 生成真正的学习路径知识点结构和笔记内容。
@@ -64,6 +65,10 @@
     - 支持配置自定义 API endpoint（兼容 OpenAI 协议即可）。
     - 支持配置 API Key、Model、Temperature 等参数。
     - 提供「启用 AI」开关，关闭时降级为 Phase 4 模板生成。
+15. **FR-15 灵活 API Key 获取**：
+    - 插件设置新增 `apiKeySource` 字段，支持 `manual` / `obsidian-localstorage` / `vault-file` 三种来源。
+    - 来源失败时自动回退到手动输入的 API Key。
+    - 模型、端点、温度等参数仍由插件设置控制，仅 API Key 从指定来源动态解析。
 
 ### 3.2 非功能需求
 - 扩展性：模块化设计，方便后续添加算法与插件适配。
@@ -230,6 +235,43 @@ Phase 4 扩展插件设置项：
 - `nodesPerLayer`: 每层知识节点数量（3-10，默认 5）
 - `generationStyle`: 笔记风格（map/tutorial/cheatsheet，默认 map）
 
+
+### 5.13 LLM 客户端（Phase 5 新增）
+
+输入：系统提示词、用户提示词、配置参数
+输出：LLM 生成的 JSON 或 Markdown 文本
+
+职责：
+- 封装 OpenAI Chat Completions API，endpoint 完全可配置，不绑定特定服务商
+- 支持流式与非流式响应
+- 错误处理和自动重试
+- 兼容一切实现了 OpenAI Chat Completions API 协议的服务
+
+数据模型：
+```typescript
+interface LLMConfig {
+  apiEndpoint: string;   // 默认 https://api.openai.com/v1
+  apiKey: string;
+  model: string;         // 默认 gpt-4o-mini
+  temperature: number;   // 默认 0.7
+}
+
+interface LLMMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+interface LLMResponse {
+  content: string;
+  model: string;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+}
+```
+
+关键函数：
+- `chat(messages: LLMMessage[], config: LLMConfig): Promise<LLMResponse>`
+- `generatePathTree(topic: string): Promise<PathTreeNode[]>`
+- `generateNoteContent(node: PathTreeNode): Promise<string>`
 ## 6. 开发计划
 
 ### 6.1 Phase 1（已完成）—— 核心引擎与插件原型
@@ -272,7 +314,7 @@ Phase 4 扩展插件设置项：
 5. **更新 `note-generator.ts`**：`generateNotes` 方法新增可选参数 `outputSubfolder`，支持自定义输出目录。文件名正则支持中文字符。
 6. **优化状态管理初始化**：新增 `ensureStateManager()` 延迟初始化方法，确保 `onLayoutReady` 回调未触发时也能正常使用。
 
-### 6.5 Phase 4（规划中）—— 用户输入驱动的学习路径生成
+### 6.5 Phase 4（已完成）—— 用户输入驱动的学习路径生成
 
 **目标**：用户无需在 vault 中预先创建任何笔记，输入主题即可从零生成完整的学习路径笔记树。
 
@@ -313,59 +355,7 @@ Phase 4 扩展插件设置项：
 4. **回退机制**：LLM 不可用时（无 API Key / 服务不可达），自动降级使用 Phase 4 模板生成。
 5. **设置项扩展**：`apiEndpoint`（默认 https://api.openai.com/v1）、`apiKey`（本地服务可空）、`model`（默认 gpt-4o-mini）、`temperature`（默认 0.7）。
 
-**新增需求**：
-
-#### Phase 5（规划中）
-
-13. **FR-13 AI 学习路径内容生成**：
-    - 启用 AI 模式时，调用 LLM 生成真正的学习路径知识点结构和笔记内容。
-    - 每条笔记包含对知识点有实际帮助的文本、示例、代码片段等。
-    - AI 生成内容遵循 Phase 4 的树结构和交叉链接规则。
-14. **FR-14 自定义 LLM 配置**：
-    - 支持配置自定义 API endpoint（兼容 OpenAI 协议即可）。
-    - 支持配置 API Key、Model、Temperature 等参数。
-    - 提供「启用 AI」开关，关闭时降级为 Phase 4 模板生成。
-
-#### 模块详细设计
-
-### 5.13 LLM 客户端（Phase 5 新增）
-
-输入：系统提示词、用户提示词、配置参数
-输出：LLM 生成的 JSON 或 Markdown 文本
-
-职责：
-- 封装 OpenAI Chat Completions API，endpoint 完全可配置，不绑定特定服务商
-- 支持流式与非流式响应
-- 错误处理和自动重试
-- 兼容一切实现了 OpenAI Chat Completions API 协议的服务
-
-数据模型：
-```typescript
-interface LLMConfig {
-  apiEndpoint: string;   // 默认 https://api.openai.com/v1
-  apiKey: string;
-  model: string;         // 默认 gpt-4o-mini
-  temperature: number;   // 默认 0.7
-}
-
-interface LLMMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-interface LLMResponse {
-  content: string;
-  model: string;
-  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
-}
-```
-
-关键函数：
-- `chat(messages: LLMMessage[], config: LLMConfig): Promise<LLMResponse>`
-- `generatePathTree(topic: string): Promise<PathTreeNode[]>`
-- `generateNoteContent(node: PathTreeNode): Promise<string>`
-
-### 6.7 Phase 5.1（规划中）—— 灵活 API Key 获取
+### 6.7 Phase 5.1（已完成）—— 灵活 API Key 获取
 
 **背景**：当前 Phase 5 实现要求用户在插件设置页面手动输入 API Key。
 在实际使用中，Obsidian 自身具备 API Key 存储能力（通过 `localStorage` 或 Obsidian 内部 Provider 配置），
@@ -445,7 +435,7 @@ class ApiKeyResolver {
 2. 多领域知识图谱可视化。
 3. CLI 工具。
 
-### 6.8 Phase 7（规划中）—— 协作与社交
+### 6.9 Phase 7（规划中）—— 协作与社交
 
 （原 Phase 6，顺延至 Phase 7）
 
@@ -461,4 +451,4 @@ class ApiKeyResolver {
 
 ## 8. 备注
 
-Phase 1、Phase 2、Phase 3、Phase 3.1、Phase 4、Phase 5 均已实现并通过验证。Phase 5.1 为当前开发阶段。
+Phase 1、Phase 2、Phase 3、Phase 3.1、Phase 4、Phase 5、Phase 5.1 均已实现并通过验证。
