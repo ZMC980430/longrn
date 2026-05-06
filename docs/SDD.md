@@ -290,7 +290,7 @@ Phase 4 扩展插件设置项：
 - 笔记间 `[[wikilink]]` 交叉引用正确
 - 重复生成不覆盖已有笔记
 
-### 6.6 Phase 5（规划中）—— AI 内容生成（通用 OpenAI 协议）
+### 6.6 Phase 5（已完成）—— AI 内容生成（通用 OpenAI 协议）
 
 **目标**：接入任何兼容 OpenAI Chat Completions API 协议的大模型服务（不限于 OpenAI 自家模型），
 为 Phase 4 的路径树生成提供 AI 赋能的笔记内容，替代模板化占位符。
@@ -365,7 +365,79 @@ interface LLMResponse {
 - `generatePathTree(topic: string): Promise<PathTreeNode[]>`
 - `generateNoteContent(node: PathTreeNode): Promise<string>`
 
-### 6.7 Phase 6（规划中）—— 高级可视化
+### 6.7 Phase 5.1（规划中）—— 灵活 API Key 获取
+
+**背景**：当前 Phase 5 实现要求用户在插件设置页面手动输入 API Key。
+在实际使用中，Obsidian 自身具备 API Key 存储能力（通过 `localStorage` 或 Obsidian 内部 Provider 配置），
+用户希望复用这些已存储的 Key，避免在多处重复配置。
+
+**目标**：支持从 Obsidian 存储中自动获取 API Key，同时模型/端点/温度等参数仍由插件设置控制。
+
+**核心需求 — FR-15 灵活 API Key 获取**：
+1. **API Key 来源选择**：插件设置新增 `apiKeySource` 字段，支持以下来源：
+   - `"manual"` — 手动输入（当前行为，保留兼容）
+   - `"obsidian-localstorage"` — 从 Obsidian 的 `localStorage` 读取
+   - `"obsidian-data-json"` — 从 Obsidian 全局 `data.json`（`~/.obsidian/`）读取
+   - `"vault-file"` — 从 Vault 内指定 JSON 文件读取
+2. **Obsidian localStorage 读取**：
+   - 利用 Obsidian Plugin API 可直接访问 `localStorage`
+   - 支持配置 Key 名称（如 `openaiApiKey`、`deepseekApiKey`）
+   - 自动从 Obsidian 内置 AI Provider 配置中查找对应服务的 API Key
+3. **Obsidian data.json 读取**：
+   - 读取 Obsidian 用户配置目录下的全局设置文件
+   - 解析其中的 Provider/AI 配置获取 API Key
+4. **Vault 文件读取**：
+   - 支持指定 Vault 内的 JSON 文件路径（相对于 Vault 根目录）
+   - 支持指定 JSON 路径表达式（如 `providers.deepseek.apiKey`）
+5. **Key 解析优先级**：
+   - 先尝试从选定来源获取 → 若失败则回退到 `apiKey` 手动输入值
+   - 每次调用 `getLLMConfig()` 时动态解析（不缓存到插件设置中）
+6. **设置 UI 更新**：
+   - API Key 设置区域增加「来源」下拉选择
+   - 选择不同来源时动态显示对应的配置字段
+   - 手动模式下显示 API Key 输入框（当前行为）
+   - Obsidian 模式下显示 Key 名称配置
+   - Vault 文件模式下显示文件路径和 JSON 路径配置
+
+**数据模型**：
+```typescript
+interface LongrnPluginSettings {
+  // ... existing fields ...
+  /** API Key 来源 */
+  apiKeySource: 'manual' | 'obsidian-localstorage' | 'obsidian-data-json' | 'vault-file';
+  /** localStorage 中的 Key 名称（apiKeySource=obsidian-localstorage 时使用） */
+  apiKeyLocalStorageName: string;
+  /** Vault 内 JSON 文件路径（apiKeySource=vault-file 时使用） */
+  apiKeyVaultFilePath: string;
+  /** JSON 文件中的 Key 路径表达式（apiKeySource=vault-file 时使用） */
+  apiKeyVaultJsonPath: string;
+  /** 手动输入的 API Key（apiKeySource=manual 时使用，保留兼容） */
+  apiKey: string;
+}
+```
+
+**关键函数**：
+```typescript
+class ApiKeyResolver {
+  /** 根据配置从指定来源解析 API Key */
+  resolve(settings: LongrnPluginSettings, app: App): Promise<string>;
+  /** 从 localStorage 读取 */
+  fromLocalStorage(keyName: string): string | null;
+  /** 从 Obsidian 全局 data.json 读取 */
+  fromObsidianDataJson(providerName: string): Promise<string | null>;
+  /** 从 Vault 内文件读取 */
+  fromVaultFile(vaultPath: string, jsonPath: string, app: App): Promise<string | null>;
+}
+```
+
+**验证**：
+- 选择「手动」来源，输入 API Key，AI 生成正常工作
+- 选择「Obsidian localStorage」来源，配置 Key 名称，AI 生成正常工作
+- 选择「Vault 文件」来源，创建测试 JSON 文件，AI 生成正常工作
+- 所有来源均失败时，给出明确提示而非静默失败
+- 切换来源后无需重启 Obsidian 即可生效
+
+### 6.8 Phase 6（规划中）—— 高级可视化
 
 （原 Phase 5，顺延至 Phase 6）
 
@@ -389,4 +461,4 @@ interface LLMResponse {
 
 ## 8. 备注
 
-Phase 1、Phase 2、Phase 3、Phase 3.1 均已实现并通过验证。Phase 4 待规划开发。
+Phase 1、Phase 2、Phase 3、Phase 3.1、Phase 4、Phase 5 均已实现并通过验证。Phase 5.1 为当前开发阶段。
