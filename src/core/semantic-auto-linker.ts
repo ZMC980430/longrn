@@ -72,7 +72,6 @@ export class SemanticAutoLinker {
 
       let enriched = para;
       if (topCandidates.length > 0) {
-        const suggestionLinks = topCandidates.map(c => `[[${c.title}]]`).join(' ');
         // Only append if the paragraph doesn't already have these links
         const alreadyLinked = [...matchedTitles];
         const newLinks = topCandidates.filter(c => !alreadyLinked.includes(c.title));

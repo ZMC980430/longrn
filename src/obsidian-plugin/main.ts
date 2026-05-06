@@ -5,8 +5,9 @@ import { NoteGenerator } from '../core/note-generator.js';
 import { LearningStateManager, StateFileOps } from '../core/learning-state-manager.js';
 import { FSRSScheduler } from '../core/fsrs-scheduler.js';
 import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
-import { LearningPathTreeGenerator, NoteStyle, AIGenerationResult } from '../core/path-tree-generator.js';
+import { LearningPathTreeGenerator, NoteStyle } from '../core/path-tree-generator.js';
 import { LLMClient, LLMConfig, DEFAULT_LLM_CONFIG } from '../core/llm-client.js';
+import { ApiKeyResolver, ApiKeySource } from '../core/api-key-resolver.js';
 
 // ── Plugin Settings ──────────────────────────────────────────────
 
@@ -37,6 +38,15 @@ interface LongrnPluginSettings {
 	model: string;
 	/** 生成温度 */
 	temperature: number;
+	// ── Phase 5.1 配置 ──
+	/** API Key 来源 */
+	apiKeySource: ApiKeySource;
+	/** localStorage 中的 Key 名称（apiKeySource=obsidian-localstorage 时使用） */
+	apiKeyLocalStorageName: string;
+	/** Vault 内 JSON 文件路径（apiKeySource=vault-file 时使用） */
+	apiKeyVaultFilePath: string;
+	/** JSON 文件中的 Key 路径表达式（apiKeySource=vault-file 时使用） */
+	apiKeyVaultJsonPath: string;
 }
 
 const DEFAULT_SETTINGS: LongrnPluginSettings = {
@@ -52,6 +62,10 @@ const DEFAULT_SETTINGS: LongrnPluginSettings = {
 	apiKey: DEFAULT_LLM_CONFIG.apiKey,
 	model: DEFAULT_LLM_CONFIG.model,
 	temperature: DEFAULT_LLM_CONFIG.temperature,
+	apiKeySource: 'manual',
+	apiKeyLocalStorageName: 'deepseekApiKey',
+	apiKeyVaultFilePath: '.obsidian/longrn-providers.json',
+	apiKeyVaultJsonPath: 'deepseek.apiKey',
 };
 
 // ── User Input Modal ─────────────────────────────────────────────
@@ -156,7 +170,7 @@ export default class LearningPathPlugin extends Plugin {
 
 	/** Get vault base path (DataAdapter.basePath is not in public types) */
 	private get vaultBasePath(): string {
-		return (this.app.vault.adapter as any).basePath;
+		return (this.app.vault.adapter as unknown as { basePath: string }).basePath;
 	}
 
 	kbBuilder!: KnowledgeBaseBuilder;
@@ -375,9 +389,9 @@ export default class LearningPathPlugin extends Plugin {
 			await this.generateNotesWithVault(selectedPath.steps);
 
 			new Notice(`「${target}」学习路径笔记生成完成！（${selectedPath.steps.length} 篇笔记）`);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateLearningPath]:', error);
-			new Notice(`生成失败: ${error.message}`);
+			new Notice(`生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
@@ -424,9 +438,9 @@ export default class LearningPathPlugin extends Plugin {
 				.map((s, i) => `${i + 1}. ${s.title} (${(semanticPath.scores?.[i] ?? 0).toFixed(3)})`)
 				.join(', ');
 			new Notice(`语义路径生成完成！\n${stepsPreview}`);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateSemanticPath]:', error);
-			new Notice(`语义路径生成失败: ${error.message}`);
+			new Notice(`语义路径生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
@@ -484,9 +498,9 @@ export default class LearningPathPlugin extends Plugin {
 				.map((s, i) => `${i + 1}. ${s.title} [${selectedPath.states?.[i] ?? 'unknown'}]`)
 				.join(' | ');
 			new Notice(`状态感知路径生成完成！\n${stepInfo}`);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateStateAwarePath]:', error);
-			new Notice(`状态感知路径生成失败: ${error.message}`);
+			new Notice(`状态感知路径生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
@@ -512,9 +526,9 @@ export default class LearningPathPlugin extends Plugin {
 				`已掌握: ${stats.mastered} | 学习中: ${stats.inProgress}\n` +
 				`今日待复习: ${dueIds.length} 项`,
 			);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [showReviewList]:', error);
-			new Notice(`获取复习列表失败: ${error.message}`);
+			new Notice(`获取复习列表失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
@@ -561,17 +575,28 @@ export default class LearningPathPlugin extends Plugin {
 
 			await this.app.vault.create(filePath, reviewLines.join('\n---\n'));
 			new Notice(`复习笔记已创建（${reviewIds.length} 项）: ${filePath}`);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateReviewNote]:', error);
-			new Notice(`生成复习笔记失败: ${error.message}`);
+			new Notice(`生成复习笔记失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
-	/** 从插件设置构造 LLMConfig */
-	private getLLMConfig(): LLMConfig {
+	/** 从插件设置构造 LLMConfig（异步解析 API Key） */
+	private async getLLMConfig(): Promise<LLMConfig> {
+		const resolver = new ApiKeyResolver();
+		const resolvedKey = await resolver.resolve(
+			this.settings.apiKeySource,
+			{
+				localStorageKeyName: this.settings.apiKeyLocalStorageName,
+				vaultFilePath: this.settings.apiKeyVaultFilePath,
+				vaultJsonPath: this.settings.apiKeyVaultJsonPath,
+				manualKey: this.settings.apiKey,
+				vaultAdapter: (this.app.vault.adapter as unknown as { read: (path: string) => Promise<string> }),
+			}
+		);
 		return {
 			apiEndpoint: this.settings.apiEndpoint,
-			apiKey: this.settings.apiKey,
+			apiKey: resolvedKey || '',
 			model: this.settings.model,
 			temperature: this.settings.temperature,
 			enabled: this.settings.aiEnabled,
@@ -629,22 +654,22 @@ export default class LearningPathPlugin extends Plugin {
 			}
 
 			new Notice(`🎉 已生成 ${createdCount} 篇 ${topic} 学习路径笔记！`);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateLearningPathTree]:', error);
-			new Notice(`生成失败: ${error.message}`);
+			new Notice(`生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
 	// ===== Phase 5: AI-Powered Learning Path =====
 
 	async generateAILearningPath() {
-		const llmConfig = this.getLLMConfig();
+		const llmConfig = await this.getLLMConfig();
 		if (!llmConfig.enabled) {
 			new Notice('⚠️ AI 生成未开启。请先在设置 → Longrn → AI 配置中启用并填写 API 信息。');
 			return;
 		}
 		if (!llmConfig.apiKey) {
-			new Notice('⚠️ 请先在设置中填写 API Key。');
+			new Notice('无法获取 API Key，请检查设置 → Longrn → API Key 来源配置');
 			return;
 		}
 
@@ -676,7 +701,7 @@ export default class LearningPathPlugin extends Plugin {
 			let notes = this.pathTreeGenerator.renderTreeToMarkdown(result.tree, this.settings.generationStyle);
 
 			// 替换 AI 生成的内容
-			for (const fileName of result.aiGeneratedNotes) {
+			for (const _fileName of result.aiGeneratedNotes) {
 				// AI 内容已在 generateAIPathTree 中写入 notes — 但为安全起见重新获取
 			}
 
@@ -700,16 +725,15 @@ export default class LearningPathPlugin extends Plugin {
 			// 汇总
 			const aiCount = result.aiGeneratedNotes.length;
 			const tmplCount = result.templatedNotes.length;
-			const totalTokens = ''; // TODO: track from LLM response
 
 			new Notice(
 				`🤖 AI 学习路径生成完毕！\n` +
 				`📝 共 ${createdCount} 篇笔记\n` +
 				`🤖 AI 内容: ${aiCount} 篇 | 📋 模板: ${tmplCount} 篇`
 			);
-		} catch (error: any) {
+		} catch (error: unknown) {
 			console.error('Longrn [generateAILearningPath]:', error);
-			new Notice(`AI 生成失败: ${error.message}`);
+			new Notice(`AI 生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
 		}
 	}
 
@@ -901,18 +925,75 @@ class LongrnSettingTab extends PluginSettingTab {
 			});
 		}
 
+		// API Key 来源选择
 		new Setting(containerEl)
-			.setName('API Key')
-			.setDesc('你的 API Key。注意：该 Key 仅保存在本地插件设置中，不会上传到别处。Ollama 等本地服务可留空。')
-			.addText((text) => {
-				text
-					.setPlaceholder('sk-...')
-					.setValue(this.plugin.settings.apiKey)
+			.setName('API Key 来源')
+			.setDesc('选择从哪里获取 API Key')
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption('manual', '手动输入')
+					.addOption('obsidian-localstorage', 'Obsidian localStorage')
+					.addOption('vault-file', 'Vault 文件')
+					.setValue(this.plugin.settings.apiKeySource)
 					.onChange(async (value) => {
-						this.plugin.settings.apiKey = value;
+						this.plugin.settings.apiKeySource = value as ApiKeySource;
 						await this.plugin.saveSettings();
+						this.display();
 					});
 			});
+
+		if (this.plugin.settings.apiKeySource === 'obsidian-localstorage') {
+			new Setting(containerEl)
+				.setName('localStorage Key 名称')
+				.setDesc('在 Obsidian localStorage 中存储 API Key 的键名')
+				.addText((text) => {
+					text.setPlaceholder('deepseekApiKey')
+						.setValue(this.plugin.settings.apiKeyLocalStorageName)
+						.onChange(async (value) => {
+							this.plugin.settings.apiKeyLocalStorageName = value;
+							await this.plugin.saveSettings();
+						});
+				});
+		}
+
+		if (this.plugin.settings.apiKeySource === 'vault-file') {
+			new Setting(containerEl)
+				.setName('Vault 文件路径')
+				.setDesc('相对于 Vault 根目录的 JSON 文件路径')
+				.addText((text) => {
+					text.setPlaceholder('.obsidian/longrn-providers.json')
+						.setValue(this.plugin.settings.apiKeyVaultFilePath)
+						.onChange(async (value) => {
+							this.plugin.settings.apiKeyVaultFilePath = value;
+							await this.plugin.saveSettings();
+						});
+				});
+			new Setting(containerEl)
+				.setName('JSON Key 路径')
+				.setDesc('用点号分隔的 JSON 路径')
+				.addText((text) => {
+					text.setPlaceholder('deepseek.apiKey')
+						.setValue(this.plugin.settings.apiKeyVaultJsonPath)
+						.onChange(async (value) => {
+							this.plugin.settings.apiKeyVaultJsonPath = value;
+							await this.plugin.saveSettings();
+						});
+				});
+		}
+
+		if (this.plugin.settings.apiKeySource === 'manual') {
+			new Setting(containerEl)
+				.setName('API Key')
+				.setDesc('你的 API Key。仅保存在本地。')
+				.addText((text) => {
+					text.setPlaceholder('sk-...')
+						.setValue(this.plugin.settings.apiKey)
+						.onChange(async (value) => {
+							this.plugin.settings.apiKey = value;
+							await this.plugin.saveSettings();
+						});
+				});
+		}
 
 		new Setting(containerEl)
 			.setName('模型')

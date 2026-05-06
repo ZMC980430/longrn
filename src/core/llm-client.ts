@@ -20,6 +20,36 @@
 
 // ── 数据模型 ──────────────────────────────────────────────────
 
+/** OpenAI Chat Completions API 原始响应结构 */
+interface ChatCompletionResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+  model?: string;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+}
+
+/** LLM 生成的路径树阶段节点 */
+export interface PathTreeStage {
+  title?: string;
+  name?: string;
+  summary?: string;
+  description?: string;
+  children?: PathTreeStage[];
+}
+
+/** convertLlmTreeToPathNodes 转换后的路径节点结构 */
+export interface ConvertedPathNode {
+  title: string;
+  summary: string;
+  content: string;
+  children: ConvertedPathNode[];
+  siblingTitles: string[];
+  parentTitle?: string;
+}
+
 /** LLM 配置 — 来自插件设置 */
 export interface LLMConfig {
   /** OpenAI 兼容 API 端点，支持任意兼容 OpenAI 协议的服务 */
@@ -104,7 +134,7 @@ export class LLMClient {
       );
     }
 
-    const data = await response.json() as any;
+    const data = await response.json() as ChatCompletionResponse;
 
     return {
       content: data.choices?.[0]?.message?.content ?? '',
@@ -175,7 +205,7 @@ export class LLMClient {
    * 返回 LLM 生成的 JSON 解析后的树节点数组。
    * 如果 LLM 不可用或解析失败，返回 null（调用方降级到 Phase 4 模板）。
    */
-  async generatePathTree(topic: string, maxNodes: number, config: LLMConfig): Promise<any[] | null> {
+  async generatePathTree(topic: string, maxNodes: number, config: LLMConfig): Promise<PathTreeStage[] | null> {
     try {
       const messages: LLMMessage[] = [
         { role: 'system', content: this.getPathTreeSystemPrompt() },
@@ -218,7 +248,7 @@ export class LLMClient {
   }
 
   /** 解析 LLM 返回的 JSON 树 */
-  private parsePathTreeResponse(content: string): any[] | null {
+  private parsePathTreeResponse(content: string): PathTreeStage[] | null {
     // Try to extract JSON from the response (handles code block wrapping)
     const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
     const jsonStr = jsonMatch ? jsonMatch[1].trim() : content.trim();
@@ -247,23 +277,22 @@ export class LLMClient {
    * 将 LLM 生成的 JSON 树转换为 Phase 4 的 PathTreeNode 结构。
    */
   convertLlmTreeToPathNodes(
-    llmNodes: any[],
+    llmNodes: PathTreeStage[],
     maxDepth: number,
     currentDepth: number = 0,
-  ): { title: string; summary: string; content: string; children: any[]; siblingTitles: string[]; parentTitle?: string }[] {
+  ): ConvertedPathNode[] {
     if (currentDepth >= maxDepth) return [];
 
-    const titles = llmNodes.map((n: any) => n.title || n.name || '');
-    const titlesSet = new Set(titles);
+    const titles = llmNodes.map((n) => n.title || n.name || '');
 
-    return llmNodes.map((node: any, index: number) => {
+    return llmNodes.map((node, index) => {
       const title = node.title || node.name || '';
       const children = node.children || [];
       return {
         title,
         summary: node.summary || node.description || '',
         content: '',
-        children: this.convertLlmTreeToPathNodes(children, maxDepth, currentDepth + 1) as any,
+        children: this.convertLlmTreeToPathNodes(children, maxDepth, currentDepth + 1),
         siblingTitles: titles.filter((_, i) => i !== index),
         parentTitle: undefined,
       };

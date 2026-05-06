@@ -146,7 +146,7 @@ function generateSummary(topic: string, title: string): string {
 /**
  * 生成节点正文（Markdown）。
  */
-function generateContent(topic: string, node: PathTreeNode, style: NoteStyle): string {
+function generateContent(topic: string, node: PathTreeNode, _style: NoteStyle): string {
   const cleanTopic = topic.replace(/^(学|学习|学会|了解|掌握)/, '').trim();
 
   const sections: string[] = [
@@ -231,7 +231,6 @@ export class LearningPathTreeGenerator {
     maxDepth: number = DEFAULT_TREE_CONFIG.maxDepth,
     nodesPerLayer: number = DEFAULT_TREE_CONFIG.nodesPerLayer,
   ): LearningPathTree {
-    const cleanTopic = topic.replace(/^(学会|学习|了解|掌握|学|如何学习|如何学会)/, '').trim();
     const tree: LearningPathTree = {
       topic,
       depth: 0,
@@ -242,7 +241,7 @@ export class LearningPathTreeGenerator {
 
     // Level 1: 按通用学习阶段生成
     const stagesToUse = GENERIC_STAGES.slice(0, nodesPerLayer);
-    tree.nodes = stagesToUse.map((stage, i) => {
+    tree.nodes = stagesToUse.map((stage, _i) => {
       return this.generateNode(topic, stage.id, nodesPerLayer, 0, maxDepth);
     });
 
@@ -447,18 +446,18 @@ export class LearningPathTreeGenerator {
     const aiNodes = await llmClient.generatePathTree(topic, nodesPerLayer, llmConfig);
     if (aiNodes && aiNodes.length > 0) {
       const converted = llmClient.convertLlmTreeToPathNodes(aiNodes, maxDepth);
-      result.tree.nodes = converted as any;
+      result.tree.nodes = converted;
     }
 
     // 2. 渲染笔记（模板结构 + AI 内容填充）
     const notes = this.renderTreeToMarkdown(result.tree, style);
 
     // 3. 逐笔记尝试用 AI 生成真实内容
-    for (const [fileName, templateContent] of notes) {
+    for (const [fileName, _templateContent] of notes) {
       const noteTitle = fileName.replace(/\.md$/, '');
 
       // 查找对应节点以获取摘要
-      const node = this.findNodeByTitle(result.tree.nodes as any, noteTitle);
+      const node = this.findNodeByTitle(result.tree.nodes, noteTitle);
 
       if (node) {
         const aiContent = await llmClient.generateNoteContent(
@@ -482,14 +481,14 @@ export class LearningPathTreeGenerator {
     }
 
     // 4. 重新交叉链接
-    const linked = this.crossLinkGeneratedNotes(notes);
+    this.crossLinkGeneratedNotes(notes);
     // 将结果写回 tree（实际上 notes 内容在调用方用于创建文件）
 
     return result;
   }
 
   /** 在树中按标题查找节点 */
-  private findNodeByTitle(nodes: any[], title: string): any | null {
+  private findNodeByTitle(nodes: PathTreeNode[], title: string): PathTreeNode | null {
     for (const node of nodes) {
       if (node.title === title) return node;
       if (node.children) {

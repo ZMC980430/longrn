@@ -4,7 +4,6 @@ import { PathPlanner } from '../core/path-planner.js';
 import { NoteGenerator } from '../core/note-generator.js';
 import { LearningStateManager } from '../core/learning-state-manager.js';
 import { FSRSScheduler } from '../core/fsrs-scheduler.js';
-import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
 
 /**
  * Longrn — Logseq plugin entry point.
@@ -21,7 +20,6 @@ async function main() {
   const pathPlanner = new PathPlanner();
   const noteGenerator = new NoteGenerator();
   const fsrsScheduler = new FSRSScheduler();
-  const semanticLinker = new SemanticAutoLinker();
 
   // Phase 1
   logseq.Editor.registerSlashCommand('生成学习路径', async () => {
@@ -35,7 +33,7 @@ async function main() {
 
   // Phase 3
   logseq.Editor.registerSlashCommand('状态感知学习路径', async () => {
-    await generateStateAwarePath(kbBuilder, pathPlanner, noteGenerator, fsrsScheduler);
+    await generateStateAwarePath(kbBuilder, pathPlanner, noteGenerator);
   });
 
   /** Displays learning stats (mastered, in-progress, due today). */
@@ -58,7 +56,7 @@ async function buildKnowledgeBase(kbBuilder: KnowledgeBaseBuilder): Promise<Map<
 
   for (const page of allPages) {
     const blocks = await logseq.Editor.getPageBlocksTree(page.uuid);
-    const content = blocks.map((b: any) => b.content).join('\n');
+    const content = blocks.map((b: { content: string }) => b.content).join('\n');
     const parsed = kbBuilder.parseNote(content, page.name);
     notes.push({
       id: page.uuid,
@@ -107,8 +105,8 @@ async function generateLearningPath(kbBuilder: KnowledgeBaseBuilder, pathPlanner
     }
 
     logseq.UI.showMsg('学习路径生成成功!', 'success');
-  } catch (error: any) {
-    logseq.UI.showMsg(`生成失败: ${error.message}`);
+  } catch (error: unknown) {
+    logseq.UI.showMsg(`生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
   }
 }
 
@@ -148,8 +146,8 @@ async function generateSemanticPath(kbBuilder: KnowledgeBaseBuilder, pathPlanner
     }
 
     logseq.UI.showMsg('语义路径生成成功!', 'success');
-  } catch (error: any) {
-    logseq.UI.showMsg(`语义路径生成失败: ${error.message}`);
+  } catch (error: unknown) {
+    logseq.UI.showMsg(`语义路径生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
   }
 }
 
@@ -160,7 +158,6 @@ async function generateStateAwarePath(
   kbBuilder: KnowledgeBaseBuilder,
   pathPlanner: PathPlanner,
   noteGenerator: NoteGenerator,
-  fsrsScheduler: FSRSScheduler,
 ) {
   try {
     logseq.UI.showMsg('开始分析知识库（状态感知模式）...');
@@ -204,13 +201,13 @@ async function generateStateAwarePath(
       .map((s, i) => `${s.title}[${selectedPath.states?.[i] ?? 'unknown'}]`)
       .join(' → ');
     logseq.UI.showMsg(`状态感知路径生成成功!\n${stepInfo}`, 'success');
-  } catch (error: any) {
-    logseq.UI.showMsg(`状态感知路径生成失败: ${error.message}`);
+  } catch (error: unknown) {
+    logseq.UI.showMsg(`状态感知路径生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
   }
 }
 
 /** Displays learning stats (mastered, in-progress, due today). */
-async function showLearningStats(kbBuilder: KnowledgeBaseBuilder) {
+async function showLearningStats(_kbBuilder: KnowledgeBaseBuilder) {
   try {
     const vaultPath = '/tmp/longrn-logseq';
     const stateManager = new LearningStateManager(vaultPath);
@@ -223,8 +220,8 @@ async function showLearningStats(kbBuilder: KnowledgeBaseBuilder) {
       `已计划: ${stats.planned}  |  待归档: ${stats.archived}\n` +
       `今日待复习: ${dueCount}`,
     );
-  } catch (error: any) {
-    logseq.UI.showMsg(`获取统计失败: ${error.message}`);
+  } catch (error: unknown) {
+    logseq.UI.showMsg(`获取统计失败: ${error instanceof Error ? error.message : '未知错误'}`);
   }
 }
 
@@ -278,8 +275,8 @@ async function generateReviewNote(
     }
 
     logseq.UI.showMsg(`复习笔记创建完成（${reviewIds.length} 项）!`, 'success');
-  } catch (error: any) {
-    logseq.UI.showMsg(`生成复习笔记失败: ${error.message}`);
+  } catch (error: unknown) {
+    logseq.UI.showMsg(`生成复习笔记失败: ${error instanceof Error ? error.message : '未知错误'}`);
   }
 }
 

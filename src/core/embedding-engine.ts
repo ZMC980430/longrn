@@ -21,7 +21,7 @@
  */
 
 // Module-level lazy pipeline factory — shared across all EmbeddingEngine instances.
-let pipelineFn: ((...args: any[]) => Promise<any>) | null = null;
+let pipelineFn: ((task: string, model: string) => Promise<unknown>) | null = null;
 
 type FeatureExtractionResult = { data: Float32Array };
 
@@ -49,9 +49,9 @@ export class EmbeddingEngine {
     if (!pipelineFn) {
       // ---- Phase 1: Import @xenova/transformers ----
       // Force the browser (WASM) ONNX backend by faking the runtime env.
-      const release: any = (typeof process !== 'undefined' && process.release)
-        ? process.release : null;
-      const savedReleaseName: string | undefined = release?.name;
+      const release: Record<string, unknown> | null = (typeof process !== 'undefined' && process.release)
+        ? process.release as unknown as Record<string, unknown> : null;
+      const savedReleaseName: string | undefined = release?.name as string | undefined;
       if (release) release.name = 'browser';
 
       try {
@@ -64,11 +64,12 @@ export class EmbeddingEngine {
         // we are NOT running locally (because fs/path stubs are empty).
         // We explicitly set the CDN path as a fallback to be safe.
         try {
-          const ortEnv = (mod as any).env;
-          if (ortEnv?.backends?.onnx?.wasm?.wasmPaths === undefined ||
-              ortEnv?.backends?.onnx?.wasm?.wasmPaths === './') {
+          const ortEnv = (mod as Record<string, unknown>).env as Record<string, unknown> | undefined;
+          const onnx = (ortEnv?.backends as Record<string, unknown> | undefined)?.onnx as Record<string, unknown> | undefined;
+          const onnxWasm = onnx?.wasm as Record<string, unknown> | undefined;
+          if (onnxWasm && (onnxWasm.wasmPaths === undefined || onnxWasm.wasmPaths === './')) {
             // CDN fallback — the official Transformers.js CDN endpoint.
-            ortEnv.backends.onnx.wasm.wasmPaths =
+            onnxWasm.wasmPaths =
               'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/';
           }
         } catch (_) {
@@ -84,13 +85,13 @@ export class EmbeddingEngine {
 
     // ---- Phase 3: Load the model ----
     try {
-      this.model = await pipelineFn('feature-extraction', this.modelName);
+      this.model = await pipelineFn('feature-extraction', this.modelName) as unknown as typeof this.model;
       console.log(`EmbeddingEngine: model "${this.modelName}" loaded`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       throw new Error(
         `无法加载语义模型 "${this.modelName}"。\n` +
         `首次使用需联网下载模型（约 80MB），请检查网络连接。\n` +
-        `原始错误: ${err.message}`,
+        `原始错误: ${(err as Error).message}`,
       );
     }
   }
