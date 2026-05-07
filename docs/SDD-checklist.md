@@ -47,11 +47,27 @@
 - [x] 去重保护机制
 - [x] 设置项扩展（maxGenerationDepth / nodesPerLayer / generationStyle）
 
-## Phase 5 规划项（待实现）
+## Phase 5 规划项（已实现）
 
-- [ ] FR-13 AI 学习路径内容生成
-- [ ] FR-14 自定义 LLM 配置（OpenAI API 兼容协议）
-- [ ] LLMClient 核心模块
-- [ ] 笔记提示词模板系统
-- [ ] 回退机制（AI不可用时使用模板生成）
-- [ ] 设置项扩展（apiEndpoint / apiKey / model / temperature）
+- [x] FR-13 AI 学习路径内容生成
+- [x] FR-14 自定义 LLM 配置（OpenAI API 兼容协议）
+- [x] LLMClient 核心模块
+- [x] 笔记提示词模板系统
+- [x] 回退机制（AI不可用时使用模板生成）
+- [x] 设置项扩展（apiEndpoint / apiKey / model / temperature）
+
+## Phase 5.1 规划项（已实现）
+
+- [x] FR-15 灵活 API Key 获取（多来源 + 动态解析）
+- [x] ApiKeyResolver 模块
+- [x] 三种来源测试全部通过
+
+## Phase 5.2 规划项（进行中）
+
+- [ ] FR-16 CLI 优先架构重构
+- [ ] LLMClient HTTP 层解耦（HttpFetcher 接口）
+- [ ] LongrnService 统一服务层
+- [ ] CLI 双模式（直接 + 桥接）
+- [ ] Obsidian 插件瘦身
+- [ ] AI 路径 CLI 调用验证
+- [ ] 所有 CLI 命令错误处理验证

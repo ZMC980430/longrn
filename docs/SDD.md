@@ -427,17 +427,114 @@ class ApiKeyResolver {
 - 所有来源均失败时，给出明确提示而非静默失败
 - 切换来源后无需重启 Obsidian 即可生效
 
-### 6.8 Phase 6（规划中）—— 高级可视化
+### 6.8 Phase 5.2（当前）—— CLI 优先架构重构
 
-（原 Phase 5，顺延至 Phase 6）
+**背景**：当前插件功能强依赖 Obsidian GUI——所有命令通过 Obsidian 命令面板触发，
+CLI 工具 `longrn-cli.mjs` 通过 `obsidian eval` 桥接调用，存在以下问题：
+1. LLMClient 使用原生 `fetch()`，在 Obsidian Electron eval 上下文受 CSP 限制，无法发起网络请求，AI 生成功能仅限 GUI 使用。
+2. 所有 CLI 操作均需 Obsidian 运行，无法独立使用。
+3. 业务逻辑散落在插件 command callback 中，缺乏统一服务层，CLI 需粘贴大段 JS 代码字符串。
+4. CLI 错误处理弱，eval 返回原始字符串，解析靠正则。
+
+**目标**：重构为标准的三层架构，使插件所有功能原生支持 CLI，不依赖 GUI。
+核心策略——**业务逻辑与表现层解耦**，核心模块不依赖 Obsidian API。
+
+**架构**：
+```
+┌──────────────────────────────────────────────┐
+│           CLI (scripts/longrn-cli.mjs)        │
+│  直接模式：Node.js 直接调用 LongrnService      │
+│  桥接模式：obsidian eval 调用（仅 vault 扫描）  │
+├──────────────────────────────────────────────┤
+│         LongrnService (src/core/)              │
+│  统一的业务 API，CLI 和 Obsidian 共用           │
+├──────────────────────────────────────────────┤
+│   Core 模块 (llm-client 重构，其余不变)         │
+│  LLMClient 通过 HttpFetcher 接口解耦 HTTP 层    │
+├──────────────────────────────────────────────┤
+│    Obsidian Plugin (瘦身 UI 壳)                │
+│  仅处理 UI (Notice/Modal) + 适配器注入          │
+└──────────────────────────────────────────────┘
+```
+
+**核心需求 — FR-16 CLI 优先架构**：
+
+1. **LLMClient HTTP 层解耦**：
+   - 新增 `HttpFetcher` 接口，定义 `postJson(url, headers, body)` 方法
+   - 提供 `NodeHttpFetcher` 默认实现（使用 Node.js `fetch`，CLI 用）
+   - Obsidian 插件通过适配器注入 `requestUrl` 实现（GUI 用）
+   - `LLMClient` 构造函数接收可选 `HttpFetcher`，默认使用 `NodeHttpFetcher`
+
+2. **LongrnService 统一服务层**（`src/core/longrn-service.ts`）：
+   - 聚合所有核心模块能力，提供统一 API
+   - 构造函数接受 `vaultPath`、`StateFileOps`、`LLMConfig`、可选 `HttpFetcher`
+   - 暴露方法：`getReviewStats()`、`getDueIds()`、`generatePathTree(topic)`、`generateAIPathTree(topic)`、`generateReviewNote(count)`、`showReviewList()`、`setStatus(noteId, status)`、`recordReview(noteId, rating)`
+   - 返回结构化数据（对象），不直接操作 UI
+
+3. **CLI 双模式**：
+   - **直接模式**（无需 Obsidian）：`stats`、`due`、`path-tree`、`ai-path`、`review-note`、`record-review`、`status`
+   - **桥接模式**（需 Obsidian 运行）：`vault-path`、`vault-semantic`、`vault-state`（扫描 vault 笔记）
+   - 统一参数风格：`node scripts/longrn-cli.mjs <command> [options]`
+   - 清晰错误处理：exit code + stderr 输出
+
+4. **Obsidian 插件瘦身**：
+   - 插件 command callback 简化为单行调用 `this.service.xxx()`
+   - 暴露 `this.service` 供 CLI eval 通过 `generateAIPathViaCLI(topic)` 等方法调用
+   - 仅保留 UI 相关代码（Notice、Modal、SettingTab）
+
+**关键接口**：
+```typescript
+/** HTTP 请求适配器 */
+interface HttpFetcher {
+  postJson(url: string, headers: Record<string,string>, body: unknown): Promise<{ status: number; json: unknown }>;
+}
+
+/** 统一服务 API */
+class LongrnService {
+  constructor(vaultPath: string, fileOps: StateFileOps, config?: Partial<LongrnConfig>, fetcher?: HttpFetcher);
+  getReviewStats(): { total: number; mastered: number; planned: number; inProgress: number; archived: number };
+  getDueIds(): string[];
+  generatePathTree(topic: string, maxDepth?: number, nodesPerLayer?: number, style?: NoteStyle): LearningPathTree;
+  generateAIPathTree(topic: string): Promise<AIGenerationResult>;
+  generateReviewNote(count?: number): { ids: string[]; content: string };
+  showReviewList(): { total: number; mastered: number; inProgress: number; planned: number; archived: number; dueCount: number };
+  setStatus(noteId: string, status: LearningStatus): Promise<void>;
+  recordReview(noteId: string, rating: 1 | 2 | 3 | 4): Promise<CardState>;
+}
+```
+
+**CLI 命令清单**：
+| 命令 | 模式 | 说明 |
+|------|------|------|
+| `stats` | 直接 | 学习统计（总数/掌握/学习中/待复习） |
+| `due` | 直接 | 列出今日待复习项 ID |
+| `path-tree <主题>` | 直接 | 模板生成学习路径树 |
+| `ai-path <主题>` | 直接 | AI 生成学习路径（需配 API Key） |
+| `review-note [数量]` | 直接 | 生成复习笔记 Markdown |
+| `record-review <id> <评分>` | 直接 | 记录评分（1-4），更新 FSRS |
+| `set-status <id> <状态>` | 直接 | 设置节点学习状态 |
+| `vault-path <主题>` | 桥接 | 从 vault 笔记生成 BFS/DFS 路径 |
+| `vault-semantic <查询>` | 桥接 | 语义搜索生成路径 |
+| `vault-state <主题>` | 桥接 | 状态感知路径（跳已掌握） |
+
+**验证**：
+- `node scripts/longrn-cli.mjs stats` 返回正确统计（无需 Obsidian 运行）
+- `node scripts/longrn-cli.mjs ai-path "Go 语言"` 成功调用 DeepSeek 生成路径树（无需 Obsidian）
+- `node scripts/longrn-cli.mjs path-tree "Rust"` 生成模板路径树 Markdown
+- Obsidian 插件中「AI 生成学习路径」命令行为不变
+- `node scripts/longrn-cli.mjs record-review "note-id" 4` 正确更新 FSRS 状态
+- 所有 CLI 命令在错误时以非零 exit code 退出，stderr 输出错误信息
+
+### 6.9 Phase 7（规划中）—— 高级可视化
+
+（原 Phase 6，顺延至 Phase 7）
 
 1. Obsidian Canvas 集成。
 2. 多领域知识图谱可视化。
-3. CLI 工具。
 
-### 6.9 Phase 7（规划中）—— 协作与社交
+### 6.10 Phase 8（规划中）—— 协作与社交
 
-（原 Phase 6，顺延至 Phase 7）
+（原 Phase 7，顺延至 Phase 8）
 
 1. 协作学习功能。
 2. 学习进度可视化仪表盘。
@@ -451,4 +548,4 @@ class ApiKeyResolver {
 
 ## 8. 备注
 
-Phase 1、Phase 2、Phase 3、Phase 3.1、Phase 4、Phase 5、Phase 5.1 均已实现并通过验证。
+Phase 1、Phase 2、Phase 3、Phase 3.1、Phase 4、Phase 5、Phase 5.1 均已实现并通过验证。Phase 5.2 正在进行。

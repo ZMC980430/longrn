@@ -64,6 +64,31 @@ export interface LLMConfig {
   enabled: boolean;
 }
 
+// ── HTTP 适配器 ─────────────────────────────────────────────
+
+/**
+ * HTTP 请求适配器接口 — 解耦 LLMClient 与具体 HTTP 实现。
+ *
+ * - CLI 环境：使用 Node.js 原生 `fetch`（NodeHttpFetcher）
+ * - Obsidian 环境：注入 `requestUrl` 实现的适配器，绕过 Electron CSP
+ */
+export interface HttpFetcher {
+  postJson(url: string, headers: Record<string, string>, body: unknown): Promise<{ status: number; json: unknown }>;
+}
+
+/** Node.js 原生 fetch 实现 — CLI 环境使用，无 CSP 限制。 */
+export const nodeHttpFetcher: HttpFetcher = {
+  async postJson(url, headers, body) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    const json = await response.json().catch(() => null);
+    return { status: response.status, json };
+  },
+};
+
 /** 默认 LLM 配置 */
 export const DEFAULT_LLM_CONFIG: LLMConfig = {
   apiEndpoint: 'https://api.openai.com/v1',
@@ -94,8 +119,16 @@ export interface LLMResponse {
 
 /**
  * LLM 客户端 — 调用 OpenAI 兼容 API 生成内容。
+ *
+ * @param fetcher - HTTP 请求适配器（CLI 环境默认 NodeHttpFetcher，Obsidian 环境注入 requestUrl 适配器）
  */
 export class LLMClient {
+  private fetcher: HttpFetcher;
+
+  constructor(fetcher: HttpFetcher = nodeHttpFetcher) {
+    this.fetcher = fetcher;
+  }
+
   /**
    * 发送 Chat Completion 请求。
    *
@@ -121,28 +154,24 @@ export class LLMClient {
       temperature: config.temperature,
     };
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+    const { status, json: data } = await this.fetcher.postJson(endpoint, headers, body);
 
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
+    if (status < 200 || status >= 300) {
+      const errorBody = typeof data === 'string' ? data : JSON.stringify(data ?? '');
       throw new Error(
-        `LLM API 请求失败 (${response.status}): ${errorBody || response.statusText}`,
+        `LLM API 请求失败 (${status}): ${errorBody || 'Unknown error'}`,
       );
     }
 
-    const data = await response.json() as ChatCompletionResponse;
+    const result = data as ChatCompletionResponse;
 
     return {
-      content: data.choices?.[0]?.message?.content ?? '',
-      model: data.model ?? config.model,
+      content: result.choices?.[0]?.message?.content ?? '',
+      model: result.model ?? config.model,
       usage: {
-        promptTokens: data.usage?.prompt_tokens ?? 0,
-        completionTokens: data.usage?.completion_tokens ?? 0,
-        totalTokens: data.usage?.total_tokens ?? 0,
+        promptTokens: result.usage?.prompt_tokens ?? 0,
+        completionTokens: result.usage?.completion_tokens ?? 0,
+        totalTokens: result.usage?.total_tokens ?? 0,
       },
     };
   }

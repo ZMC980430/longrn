@@ -1,4 +1,4 @@
-import { Plugin, Notice, PluginSettingTab, Setting, Modal, App } from 'obsidian';
+import { Plugin, Notice, PluginSettingTab, Setting, Modal, App, requestUrl } from 'obsidian';
 import { KnowledgeBaseBuilder, Note } from '../core/knowledge-builder.js';
 import { PathPlanner } from '../core/path-planner.js';
 import { NoteGenerator } from '../core/note-generator.js';
@@ -6,7 +6,8 @@ import { LearningStateManager, StateFileOps } from '../core/learning-state-manag
 import { FSRSScheduler } from '../core/fsrs-scheduler.js';
 import { SemanticAutoLinker } from '../core/semantic-auto-linker.js';
 import { LearningPathTreeGenerator, NoteStyle } from '../core/path-tree-generator.js';
-import { LLMClient, LLMConfig, DEFAULT_LLM_CONFIG } from '../core/llm-client.js';
+import { LLMClient, LLMConfig, DEFAULT_LLM_CONFIG, HttpFetcher } from '../core/llm-client.js';
+import { LongrnService, LongrnConfig } from '../core/longrn-service.js';
 import { ApiKeyResolver, ApiKeySource } from '../core/api-key-resolver.js';
 
 // ── Plugin Settings ──────────────────────────────────────────────
@@ -165,8 +166,20 @@ class TargetInputModal extends Modal {
  * Also adds a **Setting tab** that documents the plugin's features,
  * learning state model, and usage instructions.
  */
+const obsidianHttpFetcher: HttpFetcher = {
+  async postJson(url, headers, body) {
+    const resp = await requestUrl({ url, method: 'POST', headers, body: JSON.stringify(body), throw: false });
+    let json: unknown = null;
+    try { json = resp.json; } catch { /* non-JSON */ }
+    return { status: resp.status, json };
+  },
+};
+
 export default class LearningPathPlugin extends Plugin {
 	settings!: LongrnPluginSettings;
+
+	/** Phase 5.2: 统一服务实例 */
+	service!: LongrnService;
 
 	/** Get vault base path (DataAdapter.basePath is not in public types) */
 	private get vaultBasePath(): string {
@@ -222,7 +235,10 @@ export default class LearningPathPlugin extends Plugin {
 		this.fsrsScheduler = new FSRSScheduler();
 		this.semanticLinker = new SemanticAutoLinker();
 		this.pathTreeGenerator = new LearningPathTreeGenerator();
-		this.llmClient = new LLMClient();
+		this.llmClient = new LLMClient(obsidianHttpFetcher);
+
+		// Phase 5.2: 初始化统一服务层
+		this.initService();
 
 		// Initialize state manager after vault is available
 		this.app.workspace.onLayoutReady(() => {
@@ -740,6 +756,18 @@ export default class LearningPathPlugin extends Plugin {
 	onunload() {
 		console.log('Unloading Longrn Learning Path Plugin');
 	}
+
+
+	// ── Phase 5.2: 统一服务层 & CLI 桥接 ──────────────────────
+	private initService(): void {
+		const c = { outputFolder: this.settings.outputFolder, maxGenerationDepth: this.settings.maxGenerationDepth, nodesPerLayer: this.settings.nodesPerLayer, generationStyle: this.settings.generationStyle, aiEnabled: this.settings.aiEnabled, apiEndpoint: this.settings.apiEndpoint, apiKey: this.settings.apiKey, model: this.settings.model, temperature: this.settings.temperature };
+		this.service = new LongrnService(this.vaultBasePath, this.vaultStateFileOps, c, this.llmClient);
+		console.log('Longrn: service initialized (Phase 5.2 CLI-first)');
+	}
+	async generateVaultPathCLI(t: string) { const kb = await this.buildKnowledgeBase(); const g = this.kbBuilder.buildGraph(Array.from(kb.values())); const ps = this.pathPlanner.planPath(t, g); if (!ps.length||!ps[0].steps.length) throw Error('not found'); await this.generateNotesWithVault(ps[0].steps); return { steps: ps[0].steps.length }; }
+	async generateSemanticPathCLI(q: string) { const kb = await this.buildKnowledgeBase(); const g = this.kbBuilder.buildGraph(Array.from(kb.values())); const r = await this.pathPlanner.semanticPath(q, g, (this.semanticLinker as Record<string,unknown>).embeddingEngine as any); await this.generateNotesWithVault(r.steps); return { pathLength: r.steps.length }; }
+	async generateStateAwarePathCLI(t: string) { const sm = this.ensureStateManager(); const kb = await this.buildKnowledgeBase(); const g = this.kbBuilder.buildGraph(Array.from(kb.values())); const ps = this.pathPlanner.planPathWithState(t, g, sm); if (!ps.length||!ps[0].steps.length) throw Error('not found'); const mids = sm.getMasteredIds(); const sc = ps[0].steps.filter(s=>mids.has(s.id)).length; await this.generateNotesWithVault(ps[0].steps.filter(s=>!mids.has(s.id))); return { skippedCount: sc, pathLength: ps[0].steps.length }; }
+	async generateAIPathCLI(topic: string) { const r = await this.service.generateAIPathTree(topic); return { usedAI: r.usedAI, noteCount: r.aiGeneratedNotes.length }; }
 }
 
 /**
